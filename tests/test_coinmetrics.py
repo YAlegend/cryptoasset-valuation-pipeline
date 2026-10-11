@@ -1,7 +1,12 @@
+import datetime as dt
+import time
+
+import httpx
 import numpy as np
 import pandas as pd
 import pytest
 
+from cryptoval.config import Asset
 from cryptoval.sources.coinmetrics import (
     FREE_METRICS,
     CoinMetricsSource,
@@ -67,7 +72,8 @@ def test_null_metrics_are_not_coerced_to_zero(load_fixture):
 
 def test_missing_metric_column_is_absent_rather_than_fabricated(load_fixture):
     df = parse_timeseries(load_fixture("coinmetrics_null_metrics.json"))
-    assert "AdrActCnt" not in df.columns or df["AdrActCnt"].isna().all()
+    # The fixture never carries AdrActCnt, so the column must genuinely be absent.
+    assert "AdrActCnt" not in df.columns
 
 
 def test_source_exposes_name_and_contract_path():
@@ -80,3 +86,111 @@ def test_derive_realized_cap_is_idempotent(load_fixture):
     once = derive_realized_cap(parse_timeseries(load_fixture("coinmetrics_btc_eth.json")))
     twice = derive_realized_cap(once)
     pd.testing.assert_series_equal(once["realized_cap"], twice["realized_cap"])
+
+
+# --- fetch(): driven through httpx.MockTransport, no network -------------------------------
+
+START, END = dt.date(2026, 10, 5), dt.date(2026, 10, 6)
+
+
+def _asset(symbol: str, cm_id: str | None) -> Asset:
+    return Asset(
+        symbol=symbol,
+        sector=None,
+        consensus="pow",
+        cm_id=cm_id,
+        gecko_id=None,
+        yahoo_id=None,
+        is_stablecoin=False,
+        is_equity=False,
+    )
+
+
+def _row(asset: str, day: str) -> dict:
+    return {
+        "asset": asset,
+        "time": f"{day}T00:00:00.000000000Z",
+        "CapMrktCurUSD": "1000",
+        "CapMVRVCur": "2",
+    }
+
+
+def _client(handler, requests: list[httpx.Request]) -> httpx.Client:
+    def recording(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return handler(request)
+
+    return httpx.Client(transport=httpx.MockTransport(recording))
+
+
+@pytest.fixture
+def sleeps(monkeypatch):
+    calls: list[float] = []
+    monkeypatch.setattr(time, "sleep", calls.append)
+    return calls
+
+
+def test_fetch_skips_assets_without_cm_id_and_makes_no_request():
+    requests: list[httpx.Request] = []
+    client = _client(lambda r: httpx.Response(200, json={"data": []}), requests)
+    result = CoinMetricsSource().fetch(START, END, [_asset("SOL", None)], client)
+    assert len(requests) == 0
+    assert result.rows_in == 0
+    assert result.frame.empty
+    assert list(result.frame.columns) == ["asset", "metric_date"]
+
+
+def test_fetch_requests_only_resolvable_ids():
+    requests: list[httpx.Request] = []
+    client = _client(lambda r: httpx.Response(200, json={"data": []}), requests)
+    CoinMetricsSource().fetch(START, END, [_asset("SOL", None), _asset("BTC", "btc")], client)
+    assert len(requests) == 1
+    assert requests[0].url.params["assets"] == "btc"
+
+
+def test_fetch_follows_next_page_url_and_stops():
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.params.get("page") == "2":
+            return httpx.Response(200, json={"data": [_row("btc", "2026-10-06")]})
+        return httpx.Response(
+            200,
+            json={
+                "data": [_row("btc", "2026-10-05")],
+                "next_page_url": "https://community-api.coinmetrics.io/v4/next?page=2",
+            },
+        )
+
+    result = CoinMetricsSource().fetch(
+        START, END, [_asset("BTC", "btc")], _client(handler, requests)
+    )
+    assert len(requests) == 2
+    assert result.rows_in == 2
+    assert list(result.frame["metric_date"]) == [
+        pd.Timestamp("2026-10-05", tz="UTC"),
+        pd.Timestamp("2026-10-06", tz="UTC"),
+    ]
+    assert "realized_cap" in result.frame.columns
+
+
+def test_fetch_retries_429_then_succeeds(sleeps):
+    requests: list[httpx.Request] = []
+    responses = iter(
+        [httpx.Response(429), httpx.Response(200, json={"data": [_row("btc", "2026-10-05")]})]
+    )
+    client = _client(lambda r: next(responses), requests)
+    result = CoinMetricsSource().fetch(START, END, [_asset("BTC", "btc")], client)
+    assert len(requests) == 2
+    assert result.rows_in == 1
+    assert len(result.frame) == 1
+    assert sleeps == [1.0]
+
+
+def test_fetch_raises_after_exhausting_retries_on_429(sleeps):
+    requests: list[httpx.Request] = []
+    client = _client(lambda r: httpx.Response(429), requests)
+    with pytest.raises(httpx.HTTPStatusError):
+        CoinMetricsSource(max_retries=3).fetch(START, END, [_asset("BTC", "btc")], client)
+    assert len(requests) == 3
+    assert sleeps == [1.0, 2.0]
