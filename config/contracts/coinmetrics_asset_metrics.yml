@@ -1,0 +1,35 @@
+contract:
+  name: coinmetrics_asset_metrics
+  version: "1.0.0"
+  owner: yasir
+  source_url: https://community-api.coinmetrics.io/v4
+
+schema:
+  required:
+    - asset
+    - metric_date
+    - CapMrktCurUSD
+  columns:
+    asset: {type: string}
+    metric_date: {type: date}
+    CapMrktCurUSD: {type: float, minimum: 0}
+    CapMVRVCur: {type: float, minimum: 0}
+    HashRate: {type: float, minimum: 0}
+    IssTotUSD: {type: float, minimum: 0}
+    FeeTotNtv: {type: float, minimum: 0}
+    AdrActCnt: {type: float, minimum: 0}
+    TxCnt: {type: float, minimum: 0}
+    SplyCur: {type: float, minimum: 0}
+    PriceUSD: {type: float, minimum: 0}
+
+quality:
+  freshness:
+    max_delay_hours: 48          # published T+1 after UTC close, 48h allows for a late day
+  uniqueness:
+    combination: [asset, metric_date]
+  volume:
+    anomaly_threshold: 0.5       # +/-50% vs trailing average (spec section 9.2)
+
+versioning:
+  breaking_changes: [removing_required_field, changing_field_type, renaming_field]
+  non_breaking_changes: [adding_optional_field, changing_description]
