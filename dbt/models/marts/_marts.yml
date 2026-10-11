@@ -1,0 +1,35 @@
+version: 2
+
+models:
+  - name: fct_asset_metrics_daily
+    description: Conformed daily asset panel with derived cost-approach metrics.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [asset, metric_date]
+    columns:
+      - name: asset
+        tests: [not_null]
+      - name: metric_date
+        tests: [not_null]
+      - name: market_cap_usd
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+      - name: mvrv
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              severity: warn
+
+  - name: dim_date
+    columns:
+      - name: date_day
+        tests: [not_null, unique]
+      - name: halving_epoch
+        tests: [not_null]
+
+  - name: dim_asset
+    columns:
+      - name: asset
+        tests: [not_null, unique]

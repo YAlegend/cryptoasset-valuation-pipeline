@@ -22,3 +22,8 @@ jobs:
         run: ruff check cryptoval tests
       - name: Unit tests
         run: pytest -v --cov=cryptoval --cov-report=term-missing
+      - name: dbt parse
+        run: |
+          cd dbt
+          dbt deps --profiles-dir .
+          dbt parse --profiles-dir .

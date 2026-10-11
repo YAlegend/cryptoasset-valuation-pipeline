@@ -12,3 +12,4 @@ htmlcov/
 .env
 .superpowers/
 *.egg-info/
+dbt/.user.yml
