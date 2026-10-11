@@ -9,7 +9,6 @@ multiples cannot quietly use the wrong denominator.
 from __future__ import annotations
 
 import datetime as dt
-import time  # noqa: F401  (tests patch defillama.time.sleep)
 
 import httpx
 import pandas as pd

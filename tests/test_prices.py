@@ -236,3 +236,13 @@ def test_equity_fetch_with_no_tickers_returns_empty_frame_without_download(monke
     assert result.rows_in == 0
     assert result.frame.empty
     assert list(result.frame.columns) == PANEL
+
+
+def test_negative_market_cap_gives_nan_velocity():
+    df = pd.DataFrame({"market_cap_usd": [-5.0], "volume_usd": [50.0]})
+    assert np.isnan(compute_velocity(df)["velocity"].iloc[0])
+
+
+def test_negative_volume_gives_nan_holding_time():
+    df = pd.DataFrame({"market_cap_usd": [1000.0], "volume_usd": [-5.0]})
+    assert np.isnan(compute_velocity(df)["holding_time_days"].iloc[0])

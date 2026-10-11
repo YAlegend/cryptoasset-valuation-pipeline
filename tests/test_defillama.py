@@ -1,11 +1,11 @@
 import datetime as dt
+import time
 
 import httpx
 import numpy as np
 import pandas as pd
 import pytest
 
-from cryptoval.sources import defillama
 from cryptoval.sources.defillama import (
     BASE_URL,
     OVERVIEW_PATH,
@@ -83,7 +83,7 @@ def _respond(request, status, json_body=None):
 @pytest.fixture
 def sleeps(monkeypatch):
     recorded: list[float] = []
-    monkeypatch.setattr(defillama.time, "sleep", recorded.append)
+    monkeypatch.setattr(time, "sleep", recorded.append)
     return recorded
 
 
