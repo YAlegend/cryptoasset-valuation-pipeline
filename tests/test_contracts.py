@@ -6,6 +6,7 @@ import pytest
 from cryptoval.contracts.checks import (
     check_freshness,
     check_not_null,
+    check_null_rate,
     check_ranges,
     check_required_columns,
     check_unique,
@@ -15,6 +16,7 @@ from cryptoval.contracts.checks import (
 from cryptoval.contracts.loader import load_contract
 
 CONTRACT = "config/contracts/coinmetrics_asset_metrics.yml"
+NOW = dt.datetime(2026, 10, 11, 12, tzinfo=dt.UTC)
 
 
 def _frame(**overrides):
@@ -294,7 +296,7 @@ def test_equities_have_their_own_contract_with_weekend_aware_freshness():
     c = load_contract("config/contracts/equity_prices.yml")
     assert c.name == "equity_prices"
     assert c.required_columns == ["asset", "metric_date", "price_usd"]
-    assert c.freshness_max_delay_hours == 120
+    assert c.freshness_max_delay_hours == 144
     assert c.volume_anomaly_threshold is None
     friday_close = pd.DataFrame(
         {
@@ -308,3 +310,70 @@ def test_equities_have_their_own_contract_with_weekend_aware_freshness():
     monday = dt.datetime(2026, 10, 12, 13, tzinfo=dt.UTC)
     assert check_freshness(friday_close, c, "metric_date", monday).passed
     assert check_not_null(friday_close, c).passed
+
+
+# ---- Review fix pass: a column that disappears must fail loudly (spec 9.2) ----
+
+
+def _panel_with_nulls(null_fraction: float, column: str = "CapMVRVCur") -> pd.DataFrame:
+    n = 1000
+    nulls = int(n * null_fraction)
+    return pd.DataFrame(
+        {
+            "asset": ["btc"] * n,
+            "metric_date": pd.date_range("2024-01-01", periods=n, freq="D", tz="UTC"),
+            column: [None] * nulls + [1.5] * (n - nulls),
+        }
+    )
+
+
+def test_a_metric_that_vanishes_from_the_feed_fails_the_null_rate_bound():
+    """Spec 9.2: 'if it moves to Pro, the contract fails loudly rather than the panel
+    going half-null'. Dropping CapMrktCurUSD from `required` (Ruling E) removed the only
+    detector, because required_columns drives both presence and nullity."""
+    c = load_contract(CONTRACT)
+    res = check_null_rate(_panel_with_nulls(1.0), c)
+    assert not res.passed
+    assert "CapMVRVCur" in res.detail
+    assert "100" in res.detail
+
+
+def test_normal_vendor_sparsity_passes_the_null_rate_bound():
+    """Live CapMVRVCur nullity on 2026-10-11 was 11.7%: a gate that fires on that is noise."""
+    c = load_contract(CONTRACT)
+    assert check_null_rate(_panel_with_nulls(0.117), c).passed
+
+
+def test_the_null_rate_bound_is_part_of_the_standard_check_run():
+    c = load_contract(CONTRACT)
+    names = [r.name for r in run_checks(_panel_with_nulls(1.0), c, now=NOW)]
+    assert "null_rate" in names
+    assert not [r for r in run_checks(_panel_with_nulls(1.0), c, now=NOW) if r.name == "null_rate"][
+        0
+    ].passed
+
+
+def test_the_loader_rejects_a_non_numeric_null_fraction(tmp_path):
+    bad = tmp_path / "bad.yml"
+    bad.write_text(
+        "contract: {name: x, version: '1.0.0'}\n"
+        "schema:\n  required: [a]\n  columns:\n    a: {type: float, max_null_fraction: most}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="max_null_fraction"):
+        load_contract(str(bad))
+
+
+def test_defillama_uniqueness_is_keyed_by_protocol_and_date():
+    """The snapshot is per-day, so a protocol-only key fails on the second day of
+    operation while the SCD2 key is [protocol, metric_date]."""
+    c = load_contract(DEFILLAMA_CONTRACT)
+    assert c.unique_on == ["protocol", "metric_date"]
+    two_days = pd.DataFrame(
+        {
+            "protocol": ["Curve DEX", "Curve DEX"],
+            "metric_date": pd.to_datetime(["2026-10-11", "2026-10-12"], utc=True),
+            "total_fees_24h": [50642.0, 51000.0],
+        }
+    )
+    assert check_unique(two_days, c).passed

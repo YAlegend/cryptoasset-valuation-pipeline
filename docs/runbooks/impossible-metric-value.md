@@ -35,11 +35,15 @@ print('largest credible value:', cur.loc[cur['v'] <= 1e12, 'v'].max())
    metric and say so in the method card. Do NOT widen the bound to make the
    gate green, and do NOT overwrite the value with an interpolation — an
    invented number in the panel is worse than a known hole.
-3. Bronze keeps the raw vintage either way, so the exclusion is reversible and
-   the SCD2 history still shows what the vendor said and when.
+3. The SCD2 history keeps every vintage, so the exclusion is reversible from
+   silver. Bronze is NOT a second copy for this purpose: a partition is keyed by
+   `ingest_date` and a rewrite on the same date replaces it wholesale
+   (`test_rewriting_a_date_replaces_the_partition_wholesale`), so re-fetching the
+   named asset-days today overwrites today's raw response record.
 
 **Do not confuse this with the volume-anomaly WARNINGS.** Those are ratio
-deviations from the trailing 30-day mean and they are non-blocking by design:
+deviations from the mean of the previous 30 observations (30 days on a dense
+daily panel) and they are non-blocking by design:
 Bitcoin Cash's fork day (+246x), DOGE in July 2020 (+102x) and MANA in late
 2021 (+89x) are genuine market events whose ratios are indistinguishable from
 corruption. The ratio warns, the absolute bound blocks.

@@ -40,6 +40,20 @@ models:
           while the chain started in 2009, so this understates the real quantity.
           A day with any NULL input contributes 0, so the series is a lower bound
           from the first gap onward; see thermocap_has_gap.
+      - name: volume_reported_spot_usd
+        description: >
+          Coin Metrics' REPORTED SPOT volume (metric volume_reported_spot_usd_1d), the
+          equation-of-exchange T term. It is NOT CoinGecko's total_volume: the exchange
+          coverage differs, so the two series are not interchangeable and any velocity
+          or holding-time figure must state which one it used. NULL on about 6% of
+          asset-days; values above 1e12 USD are vendor corruption and are blocked by the
+          contract's range maximum before they reach this table.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+              config:
+                severity: warn
       - name: thermocap_has_gap
         description: >
           True from the first row where issuance_usd, fees_native or price_usd was

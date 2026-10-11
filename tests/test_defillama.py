@@ -183,13 +183,67 @@ def test_a_genuine_zero_revenue_stays_zero(load_fixture, sleeps):
     assert not np.isnan(wbtc["net_revenue_24h"])
 
 
-def test_fees_are_kept_when_the_revenue_call_fails_and_the_error_is_reported(
+
+
+def test_a_failed_revenue_call_fails_the_whole_fetch(load_fixture, sleeps):
+    """Review finding 1: returning fees with an all-NULL net_revenue_24h let merge_scd2
+    close every good revenue row and publish nulls as the current vintage, with every
+    validate check green. Losing one run is strictly better than that."""
+    with _client(_two_call_handler(load_fixture, revenue_status=503)) as client:
+        with pytest.raises(httpx.HTTPStatusError):
+            DefiLlamaSource(max_retries=2).fetch(START, END, [], client)
+
+
+def test_a_duplicate_protocol_in_the_revenue_feed_is_dropped_rather_than_guessed(
     load_fixture, sleeps
 ):
-    with _client(_two_call_handler(load_fixture, revenue_status=503)) as client:
-        result = DefiLlamaSource(max_retries=2).fetch(START, END, [], client)
-    assert len(result.frame) == 3
-    assert result.frame["total_fees_24h"].tolist() == [7415.0, 5266.0, 0.0]
-    assert result.frame["net_revenue_24h"].isna().all()
+    fees = load_fixture("defillama_fees_overview.json")
+    revenue = {
+        "protocols": [
+            {"name": "Curve DEX", "total24h": 1483},
+            {"name": "Curve DEX", "total24h": 9999},
+            {"name": "WBTC", "total24h": 0},
+        ]
+    }
+
+    def handler(request):
+        if "dataType=dailyRevenue" in str(request.url):
+            return _respond(request, 200, revenue)
+        return _respond(request, 200, fees)
+
+    with _client(handler) as client:
+        result = DefiLlamaSource().fetch(START, END, [], client)
+
+    assert len(result.frame) == 3  # no row multiplication
+    curve = result.frame[result.frame["protocol"] == "Curve DEX"].iloc[0]
+    assert np.isnan(curve["net_revenue_24h"])  # conflicting values become a null, not a guess
+    assert result.frame[result.frame["protocol"] == "WBTC"].iloc[0]["net_revenue_24h"] == 0.0
     assert len(result.errors) == 1
-    assert "revenue" in result.errors[0]
+    assert "Curve DEX" in result.errors[0]
+
+
+def test_revenue_for_a_protocol_with_no_fees_row_is_reported_not_silently_dropped(
+    load_fixture, sleeps
+):
+    """Fees is the row spine, so a revenue-only protocol loses its revenue. Live on
+    2026-10-11 the revenue feed was a strict subset of fees (0 orphans), so this is a
+    latent gap — but a silent one until it is counted."""
+    fees = load_fixture("defillama_fees_overview.json")
+    revenue = {
+        "protocols": [
+            {"name": "Curve DEX", "total24h": 1483},
+            {"name": "Ghost Protocol", "total24h": 777},
+        ]
+    }
+
+    def handler(request):
+        if "dataType=dailyRevenue" in str(request.url):
+            return _respond(request, 200, revenue)
+        return _respond(request, 200, fees)
+
+    with _client(handler) as client:
+        result = DefiLlamaSource().fetch(START, END, [], client)
+
+    assert set(result.frame["protocol"]) == {"Curve DEX", "Aave V2", "WBTC"}
+    assert len(result.errors) == 1
+    assert "Ghost Protocol" in result.errors[0]

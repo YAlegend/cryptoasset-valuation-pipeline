@@ -367,3 +367,42 @@ def test_an_impossible_volume_blocks_validation(tmp_path, monkeypatch):
     ranges = [f for f in report.failures if "ranges" in f]
     assert len(ranges) == 1
     assert "volume_reported_spot_usd_1d > 1" in ranges[0]
+
+
+# Review fix pass: reconcile must not report "no drift" on a partial comparison
+
+
+class _PartialReconcile:
+    name = "coingecko"
+    contract_path = "config/contracts/coingecko_market_chart.yml"
+
+    def fetch(self, start, end, assets, client):
+        frame = pd.DataFrame(
+            {
+                "asset": ["bitcoin"],
+                "metric_date": pd.to_datetime(["2026-10-09"], utc=True),
+                "price_usd": [87000.0],
+            }
+        )
+        return FetchResult(frame, 1, ("ethereum: 429 Too Many Requests",))
+
+
+def test_reconcile_reports_the_errors_and_exits_nonzero(tmp_path, monkeypatch, capsys):
+    """Spec 8.2 makes reconcile the detector for revisions outside the trailing window;
+    'no drift' over 1 of 24 assets is a false all-clear."""
+    monkeypatch.setitem(SOURCES, "coingecko", _PartialReconcile())
+    settings = Settings(data_root=str(tmp_path))
+    monkeypatch.setattr(cli, "load_config", lambda: (settings, []))
+    assert main(["reconcile", "--sources", "coingecko", "--start", "2026-10-01"]) == 1
+    out = capsys.readouterr()
+    assert "ethereum: 429" in out.err
+
+
+def test_validate_fails_when_a_declared_column_is_wholly_null(tmp_path, monkeypatch):
+    frame = _panel([("btc", "2026-10-09", 1.5)], "CapMVRVCur")
+    frame["CapMVRVCur"] = None
+    _publish(tmp_path, "asset_metrics", frame, ["asset", "metric_date"])
+    report = run_validate(_validate_settings(tmp_path, monkeypatch, "coinmetrics"))
+    null_rate = [f for f in report.failures if "null_rate" in f]
+    assert len(null_rate) == 1
+    assert "CapMVRVCur" in null_rate[0]

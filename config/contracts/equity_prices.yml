@@ -15,17 +15,18 @@ schema:
   columns:
     asset: {type: string}
     metric_date: {type: date}
-    price_usd: {type: float, minimum: 0}
+    price_usd: {type: float, minimum: 0, max_null_fraction: 0.10}
     market_cap_usd: {type: float, minimum: 0}
     volume_usd: {type: float, minimum: 0}
 
 quality:
   freshness:
-    # Equity markets close. The last bar is the last TRADING day, so a Monday-morning
-    # validate sees Friday's close (~81h) and a long weekend pushes that past 96h.
-    # 120h is four nights plus a holiday; anything staler is a real ingestion gap
+    # Equity markets close, and yfinance's end date is exclusive, so the newest bar a run
+    # can store is T-1. Measured: a Monday 13:00 UTC validate against Friday's bar is 85h,
+    # and a Monday-holiday week leaves Thursday's bar, which is 119h by Monday 23:00.
+    # 144h clears that worst healthy week with margin; anything staler is a real gap
     # (fix round 1, Ruling K).
-    max_delay_hours: 120
+    max_delay_hours: 144
   uniqueness:
     combination: [asset, metric_date]
   # No volume anomaly_threshold: the equity adapter ingests no volume, and a guard that

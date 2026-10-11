@@ -141,4 +141,10 @@ class EquitySource:
         tidy["market_cap_usd"] = np.nan
         tidy["volume_usd"] = np.nan
         frame = tidy.reindex(columns=PANEL_COLUMNS).dropna(subset=["price_usd"])
-        return FetchResult(frame, len(frame))
+        # yfinance fails PARTIALLY and without raising: a tz-cache "database is locked"
+        # drops the affected tickers and still returns a frame for the rest (seen live on
+        # 2026-10-11 for TSLA and META). Name them, or the run reports success.
+        missing = sorted(set(tickers) - set(frame["asset"]))
+        return FetchResult(
+            frame, len(frame), tuple(f"{t}: no rows returned" for t in missing)
+        )

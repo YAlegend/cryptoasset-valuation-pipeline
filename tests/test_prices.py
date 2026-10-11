@@ -306,3 +306,32 @@ def test_a_successful_fetch_reports_no_errors(load_fixture, sleeps):
     client = _client(_gecko_handler(load_fixture, set()), requests)
     result = CoinGeckoSource().fetch(START, END, [_asset("BTC", "bitcoin")], client)
     assert result.errors == ()
+
+
+# ---- Review fix pass: yfinance drops tickers silently; say so ------------
+
+
+def test_equities_validate_against_their_own_contract():
+    """Ruling K's production change: the CoinGecko contract's 48h SLA fails every
+    Monday because equity markets close."""
+    assert EquitySource().contract_path.endswith("equity_prices.yml")
+
+
+def test_a_ticker_yfinance_silently_dropped_is_reported_as_an_error(monkeypatch):
+    """Live on 2026-10-11 yfinance logged "database is locked" for TSLA and META,
+    dropped them, and still returned the other tickers."""
+    frame = _yf_frame().drop(columns=[("Close", "SPY"), ("Volume", "SPY")])
+    monkeypatch.setattr(yfinance, "download", lambda tickers, **kwargs: frame)
+    result = EquitySource().fetch(
+        START, END, [_equity("AAPL", "AAPL"), _equity("SPY", "SPY")], client=None
+    )
+    assert set(result.frame["asset"]) == {"AAPL"}
+    assert result.errors == ("SPY: no rows returned",)
+
+
+def test_a_complete_equity_fetch_reports_no_errors(monkeypatch):
+    monkeypatch.setattr(yfinance, "download", lambda tickers, **kwargs: _yf_frame())
+    result = EquitySource().fetch(
+        START, END, [_equity("AAPL", "AAPL"), _equity("SPY", "SPY")], client=None
+    )
+    assert result.errors == ()

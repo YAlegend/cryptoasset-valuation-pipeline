@@ -10,7 +10,9 @@ from cryptoval.contracts.loader import Contract
 # Spec 9.2 says "trailing average". It must be a WINDOW: an all-time expanding mean
 # turns a decade of secular growth into a permanent anomaly — measured against the live
 # Coin Metrics panel it flagged 68.8% of all asset-days (fix round 1, Ruling J).
-TRAILING_WINDOW_DAYS = 30
+# ROWS, not days: for a dense daily panel the two coincide, but a gapped series compares
+# against whatever its previous 30 observations were, however long ago.
+TRAILING_WINDOW_ROWS = 30
 
 
 @dataclass(frozen=True)
@@ -44,6 +46,25 @@ def check_not_null(df: pd.DataFrame, contract: Contract) -> CheckResult:
         if c in df.columns and df[c].isna().any()
     }
     return CheckResult("not_null", not offenders, "" if not offenders else f"nulls: {offenders}")
+
+
+def check_null_rate(df: pd.DataFrame, contract: Contract) -> CheckResult:
+    """Fail when a declared column is far nullier than the vendor's normal sparsity.
+
+    This is the detector spec 9.2 asks for: a metric that silently leaves the free tier
+    arrives present-but-null, which passes required_columns, not_null, ranges and both
+    identity assertions (they drop nulls before comparing).
+    """
+    if df.empty:
+        return CheckResult("null_rate", True, "no rows")
+    offenders = []
+    for col, ceiling in contract.null_rate_bounds.items():
+        if col not in df.columns:
+            continue
+        rate = float(df[col].isna().mean())
+        if rate > ceiling:
+            offenders.append(f"{col} is {rate:.1%} null, ceiling {ceiling:.1%}")
+    return CheckResult("null_rate", not offenders, "; ".join(offenders))
 
 
 def check_ranges(df: pd.DataFrame, contract: Contract) -> CheckResult:
@@ -88,7 +109,7 @@ def check_volume_anomaly(
         return CheckResult("volume_anomaly", True, "no SLA or too few rows")
     ordered = df.sort_values(date_col)
     values = pd.to_numeric(ordered[value_col], errors="coerce")
-    trailing = values.shift(1).rolling(TRAILING_WINDOW_DAYS, min_periods=3).mean()
+    trailing = values.shift(1).rolling(TRAILING_WINDOW_ROWS, min_periods=3).mean()
     # trailing means of zero would give an infinite deviation; treat them as unknown.
     safe_trailing = trailing.where(trailing != 0)
     deviation = (values - safe_trailing).abs() / safe_trailing
@@ -110,6 +131,7 @@ def run_checks(df: pd.DataFrame, contract: Contract, now: dt.datetime) -> list[C
         check_required_columns(df, contract),
         check_unique(df, contract),
         check_not_null(df, contract),
+        check_null_rate(df, contract),
         check_ranges(df, contract),
     ]
     if "metric_date" in df.columns:

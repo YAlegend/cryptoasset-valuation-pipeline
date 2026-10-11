@@ -59,5 +59,9 @@ fees payload has no revenue field at all. If
 `test_defillama_serves_net_revenue_distinctly_from_gross_fees` fails, or
 `net_revenue_24h` is suddenly all-null, DefiLlama has changed that dataType:
 check `https://api.llama.fi/overview/fees?dataType=dailyRevenue` by hand before
-touching the adapter. A failed revenue call degrades the run to fees-only with
-`status: partial` in the manifest; it does not silently zero the column.
+touching the adapter. A failed revenue call fails the WHOLE DefiLlama run: the
+manifest records `failed` and nothing is written, because publishing fees with a
+null revenue column would close every stored revenue row and leave the current
+view null with all gates green. The previous vintage stays current until a run
+succeeds. If two revenue rows share one protocol name, BOTH are dropped and the
+manifest names them — a conflict becomes an explicit null, never a guess.

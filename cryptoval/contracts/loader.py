@@ -18,6 +18,21 @@ class Contract:
     volume_anomaly_threshold: float | None = None
 
     @property
+    def null_rate_bounds(self) -> dict[str, float]:
+        """Per-column ceilings on the fraction of NULLs in the current view.
+
+        `required_columns` drives both presence and nullity, so relaxing a column's
+        not_null (Rulings E and H) also removed its availability detector. Spec 9.2
+        wants the contract to "fail loudly rather than the panel going half-null", and
+        that is a question about a RATE, not about any single row.
+        """
+        return {
+            col: float(spec["max_null_fraction"])
+            for col, spec in self.columns.items()
+            if "max_null_fraction" in spec
+        }
+
+    @property
     def ranges(self) -> dict[str, dict[str, float]]:
         out: dict[str, dict[str, float]] = {}
         for col, spec in self.columns.items():
@@ -33,7 +48,7 @@ _QUALITY_KEYS = {
     "volume": {"anomaly_threshold"},
     "notes": None,  # free text, not validated
 }
-_COLUMN_KEYS = {"type", "minimum", "maximum", "description"}
+_COLUMN_KEYS = {"type", "minimum", "maximum", "description", "max_null_fraction"}
 
 
 def _reject_unknown(found, allowed: set[str], where: str) -> None:
@@ -73,13 +88,18 @@ def _validate(raw: dict[str, Any], source: str) -> None:
     for col, spec in columns.items():
         spec = _mapping(spec, f"schema.columns.{col} of {source}")
         _reject_unknown(spec, _COLUMN_KEYS, f"schema.columns.{col} of {source}")
-        for bound in ("minimum", "maximum"):
+        for bound in ("minimum", "maximum", "max_null_fraction"):
             if bound in spec:
                 v = spec[bound]
                 if isinstance(v, bool) or not isinstance(v, int | float):
                     raise ValueError(
                         f"{bound} in schema.columns.{col} of {source} must be numeric, got {v!r}"
                     )
+        if "max_null_fraction" in spec and not 0.0 <= float(spec["max_null_fraction"]) <= 1.0:
+            raise ValueError(
+                f"max_null_fraction in schema.columns.{col} of {source} must be a fraction "
+                f"between 0 and 1, got {spec['max_null_fraction']!r}"
+            )
 
 
 def load_contract(path: str) -> Contract:

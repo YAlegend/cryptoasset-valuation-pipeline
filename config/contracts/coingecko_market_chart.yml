@@ -12,10 +12,10 @@ schema:
   columns:
     asset: {type: string}
     metric_date: {type: date}
-    price_usd: {type: float, minimum: 0}
-    market_cap_usd: {type: float, minimum: 0}
+    price_usd: {type: float, minimum: 0, max_null_fraction: 0.10}        # live 0%
+    market_cap_usd: {type: float, minimum: 0, max_null_fraction: 0.10}   # live 0%
     # See the Coin Metrics contract: an impossible volume blocks, an anomalous one warns.
-    volume_usd: {type: float, minimum: 0, maximum: 1.0e+12}
+    volume_usd: {type: float, minimum: 0, maximum: 1.0e+12, max_null_fraction: 0.10}  # live 0%
 
 quality:
   freshness:

@@ -224,3 +224,14 @@ def test_fetch_requests_reported_spot_volume(load_fixture):
     client = _client(lambda r: httpx.Response(200, json={"data": []}), requests)
     CoinMetricsSource().fetch(START, END, [_asset("BTC", "btc")], client)
     assert "volume_reported_spot_usd_1d" in requests[0].url.params["metrics"].split(",")
+
+
+def test_reported_spot_volume_parses_as_a_number_and_keeps_its_nulls(load_fixture):
+    """The fixture lagged the API after Ruling B added the metric, so nothing offline
+    ever saw it traverse the parser — the same fixture-honesty gap that hid Ruling G."""
+    df = parse_timeseries(load_fixture("coinmetrics_btc_eth.json"))
+    assert pd.api.types.is_numeric_dtype(df["volume_reported_spot_usd_1d"])
+    btc = df[df["asset"] == "btc"].sort_values("metric_date")
+    assert btc["volume_reported_spot_usd_1d"].iloc[0] == pytest.approx(2.2819828752e10)
+    eth = df[df["asset"] == "eth"]
+    assert eth["volume_reported_spot_usd_1d"].isna().all()

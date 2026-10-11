@@ -92,17 +92,31 @@ class DefiLlamaSource:
         rows_in = len(payload.get("protocols", []) or [])
         fees = parse_fees_overview(payload)
 
+        # No try/except: a revenue failure must fail the whole fetch. Returning fees with
+        # an all-NULL net_revenue_24h would make merge_scd2 close every good revenue row
+        # and publish nulls as the current vintage, with every validate check still green.
+        # Losing one run is strictly better than losing the stored series.
+        revenue = parse_revenue_overview(
+            get_with_retry(client, f"{BASE_URL}{REVENUE_PATH}", max_retries=self.max_retries)
+        )
+
         errors: list[str] = []
-        try:
-            revenue = parse_revenue_overview(
-                get_with_retry(
-                    client, f"{BASE_URL}{REVENUE_PATH}", max_retries=self.max_retries
-                )
+        conflicting = sorted(
+            revenue.loc[revenue.duplicated(subset="protocol", keep=False), "protocol"].unique()
+        )
+        if conflicting:
+            # Two revenue figures for one name: dropping BOTH turns the conflict into an
+            # explicit null. keep="first" would pick one by payload order, which is a guess.
+            revenue = revenue.drop_duplicates(subset="protocol", keep=False)
+            errors.append(
+                f"duplicate protocol(s) in the revenue feed, revenue dropped: {conflicting}"
             )
-        except httpx.HTTPError as exc:
-            # Fees are usable without revenue; losing both to one failed call is not.
-            errors.append(f"dailyRevenue (net_revenue_24h): {exc}")
-            revenue = pd.DataFrame(columns=["protocol", "net_revenue_24h"])
+
+        # Fees is the row spine, so a protocol DefiLlama lists for revenue but not for
+        # fees loses its revenue entirely. Count it rather than dropping it in silence.
+        orphans = sorted(set(revenue["protocol"]) - set(fees["protocol"]))
+        if orphans:
+            errors.append(f"{len(orphans)} protocol(s) with revenue but no fees row: {orphans}")
 
         frame = fees.merge(revenue, on="protocol", how="left").reindex(columns=PANEL_COLUMNS)
         frame["metric_date"] = pd.Timestamp(end, tz="UTC").normalize()

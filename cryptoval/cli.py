@@ -240,6 +240,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if args.command == "reconcile":
+        # Spec 8.2 makes reconcile the detector for revisions landing outside the trailing
+        # window, so a comparison that only covered some entities must not read as a clean
+        # bill of health.
+        incomplete = False
         with httpx.Client(timeout=settings.request_timeout_s) as client:
             for name in names:
                 result = SOURCES[name].fetch(start, end, assets, client)
@@ -253,7 +257,10 @@ def main(argv: list[str] | None = None) -> int:
                         _value_cols(result.frame, key),
                     ),
                 )
-        return 0
+                for err in result.errors:
+                    incomplete = True
+                    print(f"INCOMPLETE {name}: {err}", file=sys.stderr)
+        return 1 if incomplete else 0
 
     report = run_ingest(settings, assets, names, start, end)
     for name, outcome in report.items():
