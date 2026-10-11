@@ -5,7 +5,8 @@ models:
     description: Conformed daily asset panel with derived cost-approach metrics.
     tests:
       - dbt_utils.unique_combination_of_columns:
-          combination_of_columns: [asset, metric_date]
+          arguments:
+            combination_of_columns: [asset, metric_date]
     columns:
       - name: asset
         tests: [not_null]
@@ -15,12 +16,30 @@ models:
         tests:
           - not_null
           - dbt_utils.accepted_range:
-              min_value: 0
+              arguments:
+                min_value: 0
       - name: mvrv
         tests:
           - dbt_utils.accepted_range:
-              min_value: 0
-              severity: warn
+              arguments:
+                min_value: 0
+              config:
+                severity: warn
+      - name: thermocap_usd
+        description: >
+          WINDOWED thermocap, not true thermocap: the cumulative sum of daily miner
+          revenue (issuance_usd + fees_native * price_usd) from the first row of the
+          panel for the asset, not from genesis. For BTC the panel starts in 2015
+          while the chain started in 2009, so this understates the real quantity.
+          A day with any NULL input contributes 0, so the series is a lower bound
+          from the first gap onward; see thermocap_has_gap.
+      - name: thermocap_has_gap
+        description: >
+          True from the first row where issuance_usd, fees_native or price_usd was
+          NULL, and on every later row for that asset. When true, thermocap_usd,
+          mvtv and investor_cap_usd are lower-bound-affected and must not be read
+          as exact.
+        tests: [not_null]
 
   - name: dim_date
     columns:

@@ -3,7 +3,9 @@
 -- as-of filter instead of this model.
 select
     asset,
-    cast(metric_date as date)      as metric_date,
+    -- Convert to UTC before truncating: a bare cast uses the session TimeZone and
+    -- shifts the date by a day on non-UTC machines.
+    cast(metric_date at time zone 'UTC' as date) as metric_date,
     "CapMrktCurUSD"                as market_cap_usd,
     "CapMVRVCur"                   as mvrv,
     realized_cap,

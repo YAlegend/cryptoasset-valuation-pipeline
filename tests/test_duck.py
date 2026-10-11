@@ -8,10 +8,10 @@ from cryptoval.paths import PathResolver
 from cryptoval.scd2 import FAR_FUTURE
 
 
-def _write_silver(root: pathlib.Path) -> None:
+def _write_silver(root: pathlib.Path, with_superseded: bool = False) -> None:
     out = pathlib.Path(root, "silver", "asset_metrics")
     out.mkdir(parents=True)
-    pd.DataFrame(
+    df = pd.DataFrame(
         {
             "asset": ["btc", "btc"],
             "metric_date": pd.to_datetime(["2026-10-10", "2026-10-11"], utc=True),
@@ -22,7 +22,17 @@ def _write_silver(root: pathlib.Path) -> None:
             "is_current": [True, True],
             "row_hash": ["a", "b"],
         }
-    ).to_parquet(out / "part-0.parquet", index=False)
+    )
+    if with_superseded:
+        # The first vintage of 2026-10-10, closed when the revision arrived on 10-11.
+        old = df.iloc[[0]].copy()
+        old["CapMrktCurUSD"] = 0.9e12
+        old["effective_start_ts"] = pd.Timestamp("2026-10-10", tz="UTC")
+        old["effective_end_ts"] = pd.Timestamp("2026-10-11", tz="UTC")
+        old["is_current"] = False
+        old["row_hash"] = "old"
+        df = pd.concat([df, old], ignore_index=True)
+    df.to_parquet(out / "part-0.parquet", index=False)
 
 
 def test_connects_and_queries(tmp_path):
@@ -49,19 +59,30 @@ def test_silver_view_preserves_bitemporal_columns(tmp_path):
 
 
 def test_as_of_filter_works_in_sql(tmp_path):
-    _write_silver(tmp_path)
+    _write_silver(tmp_path, with_superseded=True)
     r = PathResolver(str(tmp_path))
     con = connect(r)
     register_silver(con, r)
-    sql = """
-        select count(*) as n from silver_asset_metrics
-        where effective_start_ts <= timestamptz '2026-10-12 00:00:00+00'
-          and effective_end_ts  >  timestamptz '2026-10-12 00:00:00+00'
-    """
-    assert query(con, sql).loc[0, "n"] == 2
-    # Before the vintage was recorded nothing was visible: the filter must discriminate.
-    before = sql.replace("2026-10-12", "2026-10-10")
-    assert query(con, before).loc[0, "n"] == 0
+
+    def visible(ts: str) -> int:
+        sql = f"""
+            select count(*) as n from silver_asset_metrics
+            where effective_start_ts <= timestamptz '{ts}+00'
+              and effective_end_ts  >  timestamptz '{ts}+00'
+        """
+        return int(query(con, sql).loc[0, "n"])
+
+    # After the revision: only the two current rows; the superseded one is excluded
+    # by the effective_end_ts bound (3 rows exist in total).
+    assert visible("2026-10-12 00:00:00") == 2
+    # Between the first load and the revision: only the old vintage was known.
+    assert visible("2026-10-10 12:00:00") == 1
+    # Before anything was recorded.
+    assert visible("2026-10-09 00:00:00") == 0
+    # as-of and is_current genuinely differ.
+    n_current = query(con, "select count(*) as n from silver_asset_metrics where is_current")
+    assert n_current.loc[0, "n"] == 2
+    assert query(con, "select count(*) as n from silver_asset_metrics").loc[0, "n"] == 3
 
 
 def test_register_silver_raises_a_clear_error_when_absent(tmp_path):
@@ -74,3 +95,11 @@ def test_register_silver_raises_a_clear_error_when_absent(tmp_path):
 def test_duckdb_file_is_created_under_the_data_root(tmp_path):
     connect(PathResolver(str(tmp_path)))
     assert pathlib.Path(tmp_path, "cryptoval.duckdb").exists()
+
+
+@pytest.mark.parametrize("root", ["s3://bucket/data", "gs://bucket/data"])
+def test_connect_rejects_remote_root_without_side_effects(tmp_path, monkeypatch, root):
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(NotImplementedError):
+        connect(PathResolver(root))
+    assert list(tmp_path.iterdir()) == []
