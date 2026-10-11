@@ -13,3 +13,4 @@ htmlcov/
 .superpowers/
 *.egg-info/
 dbt/.user.yml
+.DS_Store

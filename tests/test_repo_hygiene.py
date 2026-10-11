@@ -122,3 +122,14 @@ def test_detector_skips_excluded_directories(tmp_path):
     (tmp_path / "ok.py").write_text("x = 1\n", encoding="utf-8")
     scanned, offenders = find_shuffle_violations(tmp_path)
     assert (scanned, offenders) == (1, [])
+
+
+def test_no_os_cruft_is_tracked():
+    """A `git add -A` in fix round 1 committed three .DS_Store files; this is the guard."""
+    import subprocess
+
+    tracked = subprocess.check_output(
+        ["git", "ls-files"], cwd=REPO, text=True, stderr=subprocess.DEVNULL
+    ).splitlines()
+    cruft = [p for p in tracked if pathlib.Path(p).name in {".DS_Store", "Thumbs.db"}]
+    assert cruft == [], f"OS metadata files are tracked: {cruft}"
