@@ -19,35 +19,47 @@ DEFAULT_RTOL = 1e-6
 def _relative_mismatch(
     left: pd.Series, right: pd.Series, rtol: float
 ) -> tuple[int, float]:
+    """Count rows where left deviates from right by more than rtol (relative to right).
+
+    Nulls are *unknown* and are dropped: the vendor legitimately omits metrics. A zero
+    expected value is not unknown: zero vs non-zero is a mismatch (reported as infinite
+    deviation), zero vs zero agrees. No division by the expected value, so no warnings.
+    """
     both = pd.concat([left, right], axis=1).dropna()
     if both.empty:
         return 0, 0.0
     a = both.iloc[:, 0].to_numpy(dtype=float)
     b = both.iloc[:, 1].to_numpy(dtype=float)
-    denom = np.where(np.abs(b) > 0, np.abs(b), np.nan)
-    rel = np.abs(a - b) / denom
-    rel = rel[~np.isnan(rel)]
-    if rel.size == 0:
-        return 0, 0.0
-    return int((rel > rtol).sum()), float(rel.max())
+    diff = np.abs(a - b)
+    scale = np.abs(b)
+    bad = diff > rtol * scale
+    rel = np.divide(diff, scale, out=np.full_like(diff, np.inf), where=scale > 0)
+    rel[diff == 0] = 0.0
+    return int(bad.sum()), float(rel.max())
 
 
 def check_mvrv_identity(df: pd.DataFrame, rtol: float = DEFAULT_RTOL) -> CheckResult:
     needed = {"CapMrktCurUSD", "CapMVRVCur", "realized_cap"}
     if not needed.issubset(df.columns):
         return CheckResult("identity_mvrv", True, "columns absent")
-    mvrv = pd.to_numeric(df["CapMVRVCur"], errors="coerce").where(lambda s: s > 0)
+    raw_mvrv = pd.to_numeric(df["CapMVRVCur"], errors="coerce")
+    # Non-null MVRV <= 0 is impossible (market cap / realized cap, both positive): report it.
+    n_nonpositive = int((raw_mvrv <= 0).sum())
+    mvrv = raw_mvrv.where(lambda s: s > 0)  # guard: never divide by non-positive MVRV
     implied = pd.to_numeric(df["CapMrktCurUSD"], errors="coerce") / mvrv
     n_bad, worst = _relative_mismatch(
         pd.to_numeric(df["realized_cap"], errors="coerce"), implied, rtol
     )
-    return CheckResult(
-        "identity_mvrv",
-        n_bad == 0,
-        ""
-        if n_bad == 0
-        else f"{n_bad} rows where realized_cap != market_cap/mvrv (worst {worst:.2e})",
-    )
+    problems = []
+    if n_nonpositive:
+        problems.append(
+            f"{n_nonpositive} rows with non-positive CapMVRVCur (realized_cap undefined)"
+        )
+    if n_bad:
+        problems.append(
+            f"{n_bad} rows where realized_cap != market_cap/mvrv (worst {worst:.2e})"
+        )
+    return CheckResult("identity_mvrv", not problems, "; ".join(problems))
 
 
 def check_supply_identity(df: pd.DataFrame, rtol: float = 1e-3) -> CheckResult:
@@ -70,7 +82,7 @@ def check_supply_identity(df: pd.DataFrame, rtol: float = 1e-3) -> CheckResult:
 def check_monotonic_nondecreasing(
     df: pd.DataFrame, col: str, group_col: str = "asset", date_col: str = "metric_date"
 ) -> CheckResult:
-    if col not in df.columns or group_col not in df.columns:
+    if not {col, group_col, date_col}.issubset(df.columns):
         return CheckResult(f"monotonic_{col}", True, "columns absent")
     offenders = []
     for key, grp in df.sort_values(date_col).groupby(group_col):
