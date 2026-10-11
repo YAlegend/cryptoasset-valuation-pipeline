@@ -1,0 +1,23 @@
+contract:
+  name: coingecko_market_chart
+  version: "1.0.0"
+  owner: yasir
+  source_url: https://api.coingecko.com/api/v3
+
+schema:
+  required:
+    - asset
+    - metric_date
+    - price_usd
+  columns:
+    asset: {type: string}
+    metric_date: {type: date}
+    price_usd: {type: float, minimum: 0}
+    market_cap_usd: {type: float, minimum: 0}
+    volume_usd: {type: float, minimum: 0}
+
+quality:
+  freshness:
+    max_delay_hours: 48
+  uniqueness:
+    combination: [asset, metric_date]
