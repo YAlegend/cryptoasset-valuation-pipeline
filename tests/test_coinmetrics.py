@@ -166,6 +166,7 @@ def test_fetch_follows_next_page_url_and_stops():
         START, END, [_asset("BTC", "btc")], _client(handler, requests)
     )
     assert len(requests) == 2
+    assert "assets" not in requests[1].url.params  # params reset after the first page
     assert result.rows_in == 2
     assert list(result.frame["metric_date"]) == [
         pd.Timestamp("2026-10-05", tz="UTC"),
@@ -194,3 +195,24 @@ def test_fetch_raises_after_exhausting_retries_on_429(sleeps):
         CoinMetricsSource(max_retries=3).fetch(START, END, [_asset("BTC", "btc")], client)
     assert len(requests) == 3
     assert sleeps == [1.0, 2.0]
+
+
+def test_fetch_raises_on_self_referential_next_page_url():
+    requests: list[httpx.Request] = []
+    loop_url = "https://community-api.coinmetrics.io/v4/loop?page=1"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": [], "next_page_url": loop_url})
+
+    with pytest.raises(RuntimeError, match=r"1000 pages.*loop\?page=1"):
+        CoinMetricsSource().fetch(START, END, [_asset("BTC", "btc")], _client(handler, requests))
+    assert len(requests) == 1000
+
+
+def test_fetch_fails_fast_on_403_without_retry(sleeps):
+    requests: list[httpx.Request] = []
+    client = _client(lambda r: httpx.Response(403), requests)
+    with pytest.raises(httpx.HTTPStatusError):
+        CoinMetricsSource().fetch(START, END, [_asset("BTC", "btc")], client)
+    assert len(requests) == 1
+    assert sleeps == []

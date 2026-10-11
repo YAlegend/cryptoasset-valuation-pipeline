@@ -18,6 +18,8 @@ import pandas as pd
 from cryptoval.config import Asset
 from cryptoval.sources.base import FetchResult
 
+MAX_PAGES = 1000
+
 BASE_URL = "https://community-api.coinmetrics.io/v4"
 
 FREE_METRICS: tuple[str, ...] = (
@@ -112,7 +114,15 @@ class CoinMetricsSource:
             "page_size": self.page_size,
         }
         next_url: str | None = url
+        pages = 0
         while next_url:
+            if pages >= MAX_PAGES:
+                # Raise rather than return partial data: a silently truncated
+                # backfill is worse than a loud failure.
+                raise RuntimeError(
+                    f"Coin Metrics pagination exceeded {MAX_PAGES} pages; last url: {next_url}"
+                )
+            pages += 1
             payload = self._get(client, next_url, params)
             rows_in += len(payload.get("data", []) or [])
             frames.append(parse_timeseries(payload))
