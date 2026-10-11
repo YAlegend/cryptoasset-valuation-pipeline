@@ -14,8 +14,14 @@ per-minute ceiling), and a full backfill across 24 assets is call-heavy.
    a year at a time rather than the whole history in one pass.
 3. A rate limit no longer discards the whole pass: the adapter keeps every asset
    already fetched, stops at the failure, and the run is recorded as
-   `status: partial` with the failing asset named (fix round 1, Ruling D). Re-run
-   the remaining assets with `--sources coingecko` once the window resets.
+   `status: partial` with the failing asset named (fix round 1, Ruling D).
+   When the window resets, re-run the FULL asset list, not just the assets that
+   were missed. A bronze partition is keyed by ingest_date and a rewrite replaces
+   it wholesale (`test_rewriting_a_date_replaces_the_partition_wholesale`), so a
+   remainder-only re-run on the same day would leave bronze holding only the
+   remainder and lose the response record for the assets fetched earlier. Silver
+   keeps both vintages either way, because SCD2 only touches the keys present in
+   the incoming frame.
 4. Coin Metrics covers price and market cap for everything except SOL, so a
    CoinGecko outage degrades velocity coverage rather than blocking the panel.
 
