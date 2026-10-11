@@ -109,7 +109,9 @@ class CoinGeckoSource:
 
 class EquitySource:
     name = "equities"
-    contract_path = "config/contracts/coingecko_market_chart.yml"
+    # Its own contract, not CoinGecko's: equity markets close, so CoinGecko's 48h
+    # freshness SLA fails every Monday (fix round 1, Ruling K).
+    contract_path = "config/contracts/equity_prices.yml"
 
     def fetch(
         self,

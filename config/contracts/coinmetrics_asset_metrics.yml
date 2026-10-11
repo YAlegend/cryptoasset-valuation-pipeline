@@ -26,7 +26,10 @@ schema:
     # Reported spot volume, the equation-of-exchange T term. This is Coin Metrics'
     # reported-exchange construction, NOT CoinGecko's total_volume: different exchange
     # coverage, so the two series are not interchangeable (fix round 1, Ruling B).
-    volume_reported_spot_usd_1d: {type: float, minimum: 0}
+    # No asset trades 1e12 USD in a day: global spot volume is ~1e11. Coin Metrics'
+    # free tier served values up to 7e55 USD on 2026-10-11 (14 rows, USDC and trx_eth),
+    # and the largest credible value in the same panel was 7.5e10 (fix round 1, Ruling J).
+    volume_reported_spot_usd_1d: {type: float, minimum: 0, maximum: 1.0e+12}
 
 quality:
   freshness:

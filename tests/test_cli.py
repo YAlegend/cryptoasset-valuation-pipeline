@@ -201,8 +201,8 @@ def test_validate_flags_an_anomaly_in_one_protocol(tmp_path, monkeypatch):
     rows = [("A", f"2026-10-0{d}", 100.0) for d in range(1, 6)] + [("A", "2026-10-06", 1000.0)]
     rows += [("B", f"2026-10-0{d}", 100.0) for d in range(1, 7)]
     _publish(tmp_path, "protocol_revenue", _llama_frame(rows), ["protocol", "metric_date"])
-    failures = run_validate(_validate_settings(tmp_path, monkeypatch, "defillama"))
-    anomalies = [f for f in failures if "volume_anomaly" in f]
+    report = run_validate(_validate_settings(tmp_path, monkeypatch, "defillama"))
+    anomalies = [w for w in report.warnings if "volume_anomaly" in w]
     assert len(anomalies) == 1
     assert anomalies[0].startswith("protocol_revenue/volume_anomaly[A:total_fees_24h]: ")
     assert "total_fees_24h=1000" in anomalies[0]
@@ -215,8 +215,8 @@ def test_volume_anomaly_is_computed_per_entity_not_across_the_frame(tmp_path, mo
     for d in range(1, 7):
         rows += [("small", f"2026-10-0{d}", 1.0), ("huge", f"2026-10-0{d}", 1_000_000.0)]
     _publish(tmp_path, "protocol_revenue", _llama_frame(rows), ["protocol", "metric_date"])
-    failures = run_validate(_validate_settings(tmp_path, monkeypatch, "defillama"))
-    assert [f for f in failures if "volume_anomaly" in f] == []
+    report = run_validate(_validate_settings(tmp_path, monkeypatch, "defillama"))
+    assert report.warnings == []
 
 
 def test_validate_ignores_superseded_history_rows(tmp_path, monkeypatch):
@@ -229,7 +229,7 @@ def test_validate_ignores_superseded_history_rows(tmp_path, monkeypatch):
                         dt.datetime(2026, 10, 11, tzinfo=dt.UTC))
     write_silver(r, "asset_metrics", second)
     settings = _validate_settings(tmp_path, monkeypatch, "coinmetrics")
-    assert [f for f in run_validate(settings) if "uniqueness" in f] == []
+    assert [f for f in run_validate(settings).failures if "uniqueness" in f] == []
 
 
 def test_validate_names_table_check_and_detail_and_main_exits_nonzero(
@@ -238,7 +238,7 @@ def test_validate_names_table_check_and_detail_and_main_exits_nonzero(
     bad = _cm_frame(-5.0)  # violates the minimum: 0 range
     _publish(tmp_path, "asset_metrics", bad, ["asset", "metric_date"])
     settings = _validate_settings(tmp_path, monkeypatch, "coinmetrics")
-    failures = run_validate(settings)
+    failures = run_validate(settings).failures
     ranges = [f for f in failures if f.startswith("asset_metrics/ranges: ")]
     assert len(ranges) == 1 and "CapMrktCurUSD < 0" in ranges[0]
 
@@ -249,8 +249,8 @@ def test_validate_names_table_check_and_detail_and_main_exits_nonzero(
 
 
 def test_validate_reports_a_missing_table(tmp_path, monkeypatch):
-    failures = run_validate(_validate_settings(tmp_path, monkeypatch, "coinmetrics"))
-    assert failures == ["asset_metrics: no data ingested"]
+    report = run_validate(_validate_settings(tmp_path, monkeypatch, "coinmetrics"))
+    assert report.failures == ["asset_metrics: no data ingested"]
 
 
 # Fix round 1, Ruling D: a partial fetch is neither a success nor a total loss
@@ -311,16 +311,20 @@ def _panel(table_rows, value_col):
 
 
 def _steady_then_spike(entity, value_col, spike=10_000.0):
-    rows = [(entity, f"2026-10-0{d}", 100.0) for d in range(1, 6)]
-    rows.append((entity, "2026-10-06", spike))
+    """Five flat days then a spike, ending today so freshness is not a confound."""
+    today = dt.date.today()
+    days = [today - dt.timedelta(days=n) for n in range(5, -1, -1)]
+    rows = [(entity, d.isoformat(), 100.0) for d in days[:-1]]
+    rows.append((entity, days[-1].isoformat(), spike))
     return _panel(rows, value_col)
 
 
 def test_validate_flags_an_anomalous_coin_metrics_reported_volume(tmp_path, monkeypatch):
     frame = _steady_then_spike("btc", "volume_reported_spot_usd_1d")
     _publish(tmp_path, "asset_metrics", frame, ["asset", "metric_date"])
-    failures = run_validate(_validate_settings(tmp_path, monkeypatch, "coinmetrics"))
-    anomalies = [f for f in failures if "volume_anomaly" in f]
+    report = run_validate(_validate_settings(tmp_path, monkeypatch, "coinmetrics"))
+    assert [f for f in report.failures if "volume_anomaly" in f] == []
+    anomalies = [w for w in report.warnings if "volume_anomaly" in w]
     assert len(anomalies) == 1
     assert anomalies[0].startswith(
         "asset_metrics/volume_anomaly[btc:volume_reported_spot_usd_1d]: "
@@ -330,7 +334,36 @@ def test_validate_flags_an_anomalous_coin_metrics_reported_volume(tmp_path, monk
 def test_validate_flags_an_anomalous_coingecko_volume(tmp_path, monkeypatch):
     frame = _steady_then_spike("bitcoin", "volume_usd")
     _publish(tmp_path, "market_chart", frame, ["asset", "metric_date"])
-    failures = run_validate(_validate_settings(tmp_path, monkeypatch, "coingecko"))
-    anomalies = [f for f in failures if "volume_anomaly" in f]
+    report = run_validate(_validate_settings(tmp_path, monkeypatch, "coingecko"))
+    anomalies = [w for w in report.warnings if "volume_anomaly" in w]
     assert len(anomalies) == 1
     assert anomalies[0].startswith("market_chart/volume_anomaly[bitcoin:volume_usd]: ")
+
+
+def test_main_exits_zero_and_prints_warn_when_validation_only_warns(
+    tmp_path, monkeypatch, capsys
+):
+    """Ruling J: an anomaly is a signal to investigate, not proof the data is invalid.
+    A real market event (BCH's fork day, +246x) is indistinguishable by ratio from the
+    vendor's impossible values, so the ratio warns and the range maximum blocks."""
+    _publish(
+        tmp_path,
+        "asset_metrics",
+        _steady_then_spike("btc", "volume_reported_spot_usd_1d"),
+        ["asset", "metric_date"],
+    )
+    settings = _validate_settings(tmp_path, monkeypatch, "coinmetrics")
+    monkeypatch.setattr(cli, "load_config", lambda: (settings, []))
+    assert main(["validate"]) == 0
+    captured = capsys.readouterr()
+    assert "WARN asset_metrics/volume_anomaly[btc:" in captured.err
+    assert "FAIL" not in captured.err
+
+
+def test_an_impossible_volume_blocks_validation(tmp_path, monkeypatch):
+    frame = _steady_then_spike("usdc", "volume_reported_spot_usd_1d", spike=6.99755e55)
+    _publish(tmp_path, "asset_metrics", frame, ["asset", "metric_date"])
+    report = run_validate(_validate_settings(tmp_path, monkeypatch, "coinmetrics"))
+    ranges = [f for f in report.failures if "ranges" in f]
+    assert len(ranges) == 1
+    assert "volume_reported_spot_usd_1d > 1" in ranges[0]

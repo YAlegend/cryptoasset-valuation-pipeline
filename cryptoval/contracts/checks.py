@@ -7,6 +7,11 @@ import pandas as pd
 
 from cryptoval.contracts.loader import Contract
 
+# Spec 9.2 says "trailing average". It must be a WINDOW: an all-time expanding mean
+# turns a decade of secular growth into a permanent anomaly — measured against the live
+# Coin Metrics panel it flagged 68.8% of all asset-days (fix round 1, Ruling J).
+TRAILING_WINDOW_DAYS = 30
+
 
 @dataclass(frozen=True)
 class CheckResult:
@@ -83,7 +88,7 @@ def check_volume_anomaly(
         return CheckResult("volume_anomaly", True, "no SLA or too few rows")
     ordered = df.sort_values(date_col)
     values = pd.to_numeric(ordered[value_col], errors="coerce")
-    trailing = values.shift(1).expanding(min_periods=3).mean()
+    trailing = values.shift(1).rolling(TRAILING_WINDOW_DAYS, min_periods=3).mean()
     # trailing means of zero would give an infinite deviation; treat them as unknown.
     safe_trailing = trailing.where(trailing != 0)
     deviation = (values - safe_trailing).abs() / safe_trailing

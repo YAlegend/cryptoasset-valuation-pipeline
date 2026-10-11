@@ -238,3 +238,73 @@ def test_defillama_fees_are_not_required_but_negative_fees_still_fail():
     assert check_not_null(frame, c).passed
     negative = pd.DataFrame({"protocol": ["A"], "total_fees_24h": [-2803.0]})
     assert not check_ranges(negative, c).passed
+
+
+# ---- Fix round 1, Rulings J and K: a gate that fires on healthy data is no gate
+
+
+def _growing(days: int, rate: float) -> pd.DataFrame:
+    """A series growing steadily — the normal shape of a decade of crypto volume."""
+    return pd.DataFrame(
+        {
+            "metric_date": pd.date_range("2015-01-01", periods=days, freq="D", tz="UTC"),
+            "volume_reported_spot_usd_1d": [1_000_000.0 * (1 + rate) ** i for i in range(days)],
+        }
+    )
+
+
+def test_the_volume_baseline_is_a_trailing_window_not_all_of_history():
+    """An all-time mean turns secular growth into a permanent anomaly: 68.8% of live
+    Coin Metrics asset-days were flagged by the expanding baseline."""
+    c = load_contract(CONTRACT)
+    steady_growth = _growing(200, 0.01)
+    result = check_volume_anomaly(
+        steady_growth, c, "volume_reported_spot_usd_1d", "metric_date"
+    )
+    assert result.passed, result.detail
+
+
+def test_the_volume_check_still_flags_a_step_change_against_the_trailing_window():
+    c = load_contract(CONTRACT)
+    frame = _growing(60, 0.0)
+    frame.loc[59, "volume_reported_spot_usd_1d"] = 8.0e52
+    result = check_volume_anomaly(frame, c, "volume_reported_spot_usd_1d", "metric_date")
+    assert not result.passed
+    assert "volume_reported_spot_usd_1d" in result.detail
+
+
+def test_an_impossible_volume_fails_the_blocking_range_bound():
+    """Ruling J: 14 live rows carried volumes up to 7e55 USD. Impossibility blocks;
+    merely anomalous values warn."""
+    c = load_contract(CONTRACT)
+    frame = pd.DataFrame(
+        {
+            "asset": ["usdc"],
+            "metric_date": pd.to_datetime(["2026-07-31"], utc=True),
+            "volume_reported_spot_usd_1d": [6.99755e55],
+        }
+    )
+    res = check_ranges(frame, c)
+    assert not res.passed
+    assert "volume_reported_spot_usd_1d" in res.detail
+
+
+def test_equities_have_their_own_contract_with_weekend_aware_freshness():
+    """Ruling K: equity markets close, so a 48h SLA fails every Monday."""
+    c = load_contract("config/contracts/equity_prices.yml")
+    assert c.name == "equity_prices"
+    assert c.required_columns == ["asset", "metric_date", "price_usd"]
+    assert c.freshness_max_delay_hours == 120
+    assert c.volume_anomaly_threshold is None
+    friday_close = pd.DataFrame(
+        {
+            "asset": ["AAPL"],
+            "metric_date": pd.to_datetime(["2026-10-09"], utc=True),
+            "price_usd": [250.0],
+            "market_cap_usd": [None],
+            "volume_usd": [None],
+        }
+    )
+    monday = dt.datetime(2026, 10, 12, 13, tzinfo=dt.UTC)
+    assert check_freshness(friday_close, c, "metric_date", monday).passed
+    assert check_not_null(friday_close, c).passed

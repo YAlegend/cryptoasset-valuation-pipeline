@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import datetime as dt
 import pathlib
 import sys
@@ -131,7 +132,7 @@ def run_ingest(
     return report
 
 
-def _volume_anomaly_failures(
+def _volume_anomaly_warnings(
     name: str, table: str, df: pd.DataFrame, contract: Contract
 ) -> list[str]:
     spec = VOLUME_CHECKS.get(name)
@@ -140,19 +141,35 @@ def _volume_anomaly_failures(
     entity_col, value_cols = spec
     if entity_col not in df.columns:
         return []
-    failures: list[str] = []
+    flagged: list[str] = []
     for value_col in value_cols:
         if value_col not in df.columns:
             continue
         for entity, series in df.groupby(entity_col):
             result = check_volume_anomaly(series, contract, value_col, "metric_date")
             if not result.passed:
-                failures.append(f"{table}/volume_anomaly[{entity}:{value_col}]: {result.detail}")
-    return failures
+                flagged.append(f"{table}/volume_anomaly[{entity}:{value_col}]: {result.detail}")
+    return flagged
 
 
-def run_validate(settings: Settings) -> list[str]:
+@dataclasses.dataclass(frozen=True)
+class Validation:
+    """Blocking failures and non-blocking warnings, kept apart.
+
+    A volume anomaly warns: on live data a genuine market event (Bitcoin Cash's fork
+    day, +246x against its trailing mean) is indistinguishable by ratio from the
+    vendor's impossible values, and a gate that fires on healthy data is no gate
+    (fix round 1, Ruling J). Impossibility is blocked by the contract's range
+    maximum instead.
+    """
+
+    failures: list[str]
+    warnings: list[str]
+
+
+def run_validate(settings: Settings) -> Validation:
     failures: list[str] = []
+    warnings: list[str] = []
     for name, table in SILVER_TABLE.items():
         history = _read_silver(settings, table)
         if history.empty:
@@ -167,8 +184,8 @@ def run_validate(settings: Settings) -> list[str]:
         for result in run_identity_checks(df):
             if not result.passed:
                 failures.append(f"{table}/{result.name}: {result.detail}")
-        failures.extend(_volume_anomaly_failures(name, table, df, contract))
-    return failures
+        warnings.extend(_volume_anomaly_warnings(name, table, df, contract))
+    return Validation(failures, warnings)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -192,11 +209,18 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if args.command == "validate":
-        failures = run_validate(settings)
-        for f in failures:
+        report = run_validate(settings)
+        for w in report.warnings:
+            print(f"WARN {w}", file=sys.stderr)
+        for f in report.failures:
             print(f"FAIL {f}", file=sys.stderr)
-        print("validation passed" if not failures else f"{len(failures)} check(s) failed")
-        return 1 if failures else 0
+        if report.failures:
+            print(f"{len(report.failures)} check(s) failed, {len(report.warnings)} warning(s)")
+        elif report.warnings:
+            print(f"validation passed with {len(report.warnings)} warning(s)")
+        else:
+            print("validation passed")
+        return 1 if report.failures else 0
 
     names = [s.strip() for s in args.sources.split(",") if s.strip()]
     unknown = [n for n in names if n not in SOURCES]

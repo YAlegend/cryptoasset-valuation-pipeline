@@ -14,7 +14,8 @@ schema:
     metric_date: {type: date}
     price_usd: {type: float, minimum: 0}
     market_cap_usd: {type: float, minimum: 0}
-    volume_usd: {type: float, minimum: 0}
+    # See the Coin Metrics contract: an impossible volume blocks, an anomalous one warns.
+    volume_usd: {type: float, minimum: 0, maximum: 1.0e+12}
 
 quality:
   freshness:
