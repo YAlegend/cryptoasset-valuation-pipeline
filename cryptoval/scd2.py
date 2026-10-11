@@ -34,6 +34,13 @@ def _dedupe_incoming(incoming: pd.DataFrame, key: list[str]) -> pd.DataFrame:
     return incoming.drop_duplicates(subset=key, keep="last").reset_index(drop=True)
 
 
+def _require_non_null_keys(df: pd.DataFrame, key: list[str]) -> None:
+    # A null key never matches the lookup, so every reload would open another
+    # current row for it and break exactly-one-current.
+    if len(df) and df[key].isna().any().any():
+        raise ValueError(f"null values in key columns {key}")
+
+
 def merge_scd2(
     existing: pd.DataFrame,
     incoming: pd.DataFrame,
@@ -42,6 +49,7 @@ def merge_scd2(
     as_of: dt.datetime,
 ) -> pd.DataFrame:
     as_of_ts = pd.Timestamp(as_of)
+    _require_non_null_keys(incoming, key)
     fresh = add_row_hash(_dedupe_incoming(incoming, key), value_cols)
 
     if existing is None or existing.empty:
@@ -50,6 +58,15 @@ def merge_scd2(
         opened["effective_end_ts"] = FAR_FUTURE
         opened["is_current"] = True
         return opened.reset_index(drop=True)
+
+    latest = existing["effective_start_ts"].max()
+    if as_of_ts < latest:
+        # An older as_of would invert intervals and make superseded values
+        # appear knowable earlier than they were (look-ahead).
+        raise ValueError(
+            f"as_of {as_of_ts.isoformat()} is earlier than the latest "
+            f"effective_start_ts {latest.isoformat()}; refusing to rewrite history"
+        )
 
     history = existing.copy()
     current = history[history["is_current"]]
@@ -108,6 +125,7 @@ def reconcile_report(
     outside it would otherwise be invisible (Review Focus 4). The reconcile
     command runs this over an arbitrary range and reports the drift.
     """
+    _require_non_null_keys(incoming, key)
     fresh = add_row_hash(_dedupe_incoming(incoming, key), value_cols)
     if existing is None or existing.empty:
         return {"new": len(fresh), "changed": 0, "unchanged": 0}

@@ -1,6 +1,7 @@
 import datetime as dt
 
 import pandas as pd
+import pytest
 
 from cryptoval.scd2 import (
     FAR_FUTURE,
@@ -186,3 +187,47 @@ def test_reconcile_report_counts_new_keys_and_writes_nothing():
     both = pd.concat([_incoming(100.0), _incoming(7.0, asset="eth")], ignore_index=True)
     assert reconcile_report(hist, both, KEY, VALS) == {"new": 1, "changed": 0, "unchanged": 1}
     pd.testing.assert_frame_equal(hist, snapshot)
+
+
+def test_out_of_order_as_of_is_refused_not_silently_rewriting_history():
+    hist = merge_scd2(_empty(), _incoming(100.0), KEY, VALS, T2)
+    with pytest.raises(ValueError, match="earlier than the latest"):
+        merge_scd2(hist, _incoming(110.0), KEY, VALS, T1)
+
+
+def test_same_as_of_as_existing_start_is_allowed_and_forward_order_unaffected():
+    hist = merge_scd2(_empty(), _incoming(100.0), KEY, VALS, T1)
+    hist = merge_scd2(hist, _incoming(50.0, asset="eth"), KEY, VALS, T1)
+    hist = merge_scd2(hist, _incoming(110.0), KEY, VALS, T2)
+    assert len(hist) == 3 and int(hist["is_current"].sum()) == 2
+
+
+def test_null_key_values_are_rejected():
+    bad = _incoming(1.0)
+    bad["asset"] = [None]
+    with pytest.raises(ValueError, match="null values in key"):
+        merge_scd2(_empty(), bad, KEY, VALS, T1)
+    nat = _incoming(1.0)
+    nat["metric_date"] = pd.to_datetime([None], utc=True)
+    with pytest.raises(ValueError, match="null values in key"):
+        reconcile_report(_empty(), nat, KEY, VALS)
+
+
+def test_reconcile_report_single_column_key():
+    empty = pd.DataFrame(columns=["asset", "market_cap"])
+    hist = merge_scd2(
+        empty, pd.DataFrame({"asset": ["a", "b"], "market_cap": [1.0, 2.0]}), ["asset"], VALS, T1
+    )
+    inc = pd.DataFrame({"asset": ["a", "b", "c"], "market_cap": [1.0, 9.0, 3.0]})
+    assert reconcile_report(hist, inc, ["asset"], VALS) == {
+        "new": 1,
+        "changed": 1,
+        "unchanged": 1,
+    }
+
+
+def test_reconcile_report_dedupes_incoming_duplicates():
+    hist = merge_scd2(_empty(), _incoming(100.0), KEY, VALS, T1)
+    dupes = pd.concat([_incoming(999.0), _incoming(100.0)], ignore_index=True)
+    # last row wins: the key is unchanged, counted once (not changed + unchanged)
+    assert reconcile_report(hist, dupes, KEY, VALS) == {"new": 0, "changed": 0, "unchanged": 1}
