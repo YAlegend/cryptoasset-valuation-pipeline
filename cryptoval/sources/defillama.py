@@ -9,14 +9,14 @@ multiples cannot quietly use the wrong denominator.
 from __future__ import annotations
 
 import datetime as dt
-import time
+import time  # noqa: F401  (tests patch defillama.time.sleep)
 
 import httpx
 import pandas as pd
 
 from cryptoval.config import Asset
 from cryptoval.hashing import stable_hash
-from cryptoval.sources.base import FetchResult
+from cryptoval.sources.base import FetchResult, get_with_retry
 
 BASE_URL = "https://api.llama.fi"
 OVERVIEW_PATH = "/overview/fees?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true"
@@ -63,20 +63,6 @@ class DefiLlamaSource:
     def __init__(self, max_retries: int = 5) -> None:
         self.max_retries = max_retries
 
-    def _get(self, client: httpx.Client, url: str) -> dict:
-        delay = 1.0
-        for attempt in range(self.max_retries):
-            response = client.get(url)
-            if response.status_code in (429, 500, 502, 503, 504):
-                if attempt == self.max_retries - 1:
-                    response.raise_for_status()
-                time.sleep(delay)
-                delay *= 2
-                continue
-            response.raise_for_status()
-            return response.json()
-        raise RuntimeError("unreachable")
-
     def fetch(
         self,
         start: dt.date,
@@ -84,7 +70,7 @@ class DefiLlamaSource:
         assets: list[Asset],
         client: httpx.Client,
     ) -> FetchResult:
-        payload = self._get(client, f"{BASE_URL}{OVERVIEW_PATH}")
+        payload = get_with_retry(client, f"{BASE_URL}{OVERVIEW_PATH}", max_retries=self.max_retries)
         rows_in = len(payload.get("protocols", []) or [])
         frame = parse_fees_overview(payload)
         frame["metric_date"] = pd.Timestamp(end, tz="UTC").normalize()

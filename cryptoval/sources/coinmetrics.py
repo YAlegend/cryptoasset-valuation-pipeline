@@ -9,14 +9,13 @@ cryptoval.contracts.identities guards the derivation (spec section 6.2).
 from __future__ import annotations
 
 import datetime as dt
-import time
 
 import httpx
 import numpy as np
 import pandas as pd
 
 from cryptoval.config import Asset
-from cryptoval.sources.base import FetchResult
+from cryptoval.sources.base import FetchResult, get_with_retry
 
 MAX_PAGES = 1000
 
@@ -77,20 +76,6 @@ class CoinMetricsSource:
         self.max_retries = max_retries
         self.page_size = page_size
 
-    def _get(self, client: httpx.Client, url: str, params: dict | None) -> dict:
-        delay = 1.0
-        for attempt in range(self.max_retries):
-            response = client.get(url, params=params)
-            if response.status_code in (429, 500, 502, 503, 504):
-                if attempt == self.max_retries - 1:
-                    response.raise_for_status()
-                time.sleep(delay)
-                delay *= 2
-                continue
-            response.raise_for_status()
-            return response.json()
-        raise RuntimeError("unreachable")
-
     def fetch(
         self,
         start: dt.date,
@@ -123,7 +108,7 @@ class CoinMetricsSource:
                     f"Coin Metrics pagination exceeded {MAX_PAGES} pages; last url: {next_url}"
                 )
             pages += 1
-            payload = self._get(client, next_url, params)
+            payload = get_with_retry(client, next_url, params, max_retries=self.max_retries)
             rows_in += len(payload.get("data", []) or [])
             frames.append(parse_timeseries(payload))
             next_url = payload.get("next_page_url")
