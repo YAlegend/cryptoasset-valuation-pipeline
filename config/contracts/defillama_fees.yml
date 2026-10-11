@@ -1,0 +1,26 @@
+contract:
+  name: defillama_fees
+  version: "1.0.0"
+  owner: yasir
+  source_url: https://api.llama.fi
+
+schema:
+  required:
+    - protocol
+    - total_fees_24h
+  columns:
+    protocol: {type: string}
+    total_fees_24h: {type: float, minimum: 0}
+    total_fees_30d: {type: float, minimum: 0}
+    net_revenue_24h: {type: float, minimum: 0}
+    methodology_hash: {type: string}
+
+quality:
+  uniqueness:
+    combination: [protocol]
+  volume:
+    anomaly_threshold: 0.5
+  notes: |
+    methodology_hash fingerprints DefiLlama's own per-protocol methodology
+    text. A change to it means the revenue series has been redefined and the
+    history is no longer comparable (spec section 9.2).

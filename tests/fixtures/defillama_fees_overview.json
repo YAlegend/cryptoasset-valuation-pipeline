@@ -1,0 +1,5 @@
+{"protocols":[
+ {"name":"Curve DEX","total24h":7415,"total30d":3447578,"revenue24h":1483,"methodology":{"Fees":"Trading fees paid by users","Revenue":"Share to veCRV holders"}},
+ {"name":"Aave V2","total24h":5266,"total30d":151852,"revenue24h":null,"methodology":{"Fees":"Interest paid by borrowers"}},
+ {"name":"WBTC","total24h":0,"total30d":0.31,"revenue24h":0,"methodology":{}}
+]}
