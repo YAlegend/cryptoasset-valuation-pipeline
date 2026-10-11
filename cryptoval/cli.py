@@ -1,0 +1,228 @@
+"""Command-line entry point: the only module that wires the pieces together."""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import pathlib
+import sys
+
+import httpx
+import pandas as pd
+
+from cryptoval.config import Asset, Settings, load_config
+from cryptoval.contracts.checks import check_volume_anomaly, run_checks
+from cryptoval.contracts.identities import run_identity_checks
+from cryptoval.contracts.loader import Contract, load_contract
+from cryptoval.io.bronze import write_bronze, write_silver
+from cryptoval.manifest import RunManifest
+from cryptoval.scd2 import current_view, merge_scd2, reconcile_report
+from cryptoval.sources.coinmetrics import CoinMetricsSource
+from cryptoval.sources.defillama import DefiLlamaSource
+from cryptoval.sources.prices import CoinGeckoSource, EquitySource
+
+SOURCES = {
+    "coinmetrics": CoinMetricsSource(),
+    "defillama": DefiLlamaSource(),
+    "coingecko": CoinGeckoSource(),
+    "equities": EquitySource(),
+}
+
+SILVER_TABLE = {
+    "coinmetrics": "asset_metrics",
+    "defillama": "protocol_revenue",
+    "coingecko": "market_chart",
+    "equities": "equity_prices",
+}
+
+KEYS = {
+    "coinmetrics": ["asset", "metric_date"],
+    "defillama": ["protocol", "metric_date"],
+    "coingecko": ["asset", "metric_date"],
+    "equities": ["asset", "metric_date"],
+}
+
+# Volume-anomaly guard (spec section 9.2): which value columns to watch, per source, and
+# which column identifies one series. The check assumes a single series, so it must be
+# applied per entity, never to the pooled frame.
+VOLUME_CHECKS = {
+    "defillama": ("protocol", ["total_fees_24h", "net_revenue_24h"]),
+    "coingecko": ("asset", ["volume_usd"]),
+}
+
+
+def assert_unique_symbols(assets: list[Asset]) -> None:
+    """Later tasks key on symbol; a duplicate silently halves one asset's coverage."""
+    seen: set[str] = set()
+    dupes: set[str] = set()
+    for asset in assets:
+        sym = asset.symbol.upper()
+        (dupes if sym in seen else seen).add(sym)
+    if dupes:
+        raise ValueError(f"duplicate symbol(s) in the asset universe: {sorted(dupes)}")
+
+
+def _read_silver(settings: Settings, table: str) -> pd.DataFrame:
+    path = pathlib.Path(settings.resolver.table("silver", table)) / "part-0.parquet"
+    return pd.read_parquet(path) if path.exists() else pd.DataFrame()
+
+
+def _value_cols(frame: pd.DataFrame, key: list[str]) -> list[str]:
+    return [c for c in frame.columns if c not in key and not c.startswith("_")]
+
+
+def run_ingest(
+    settings: Settings,
+    assets: list[Asset],
+    source_names: list[str],
+    start: dt.date,
+    end: dt.date,
+) -> dict[str, dict]:
+    manifest = RunManifest(settings.resolver)
+    report: dict[str, dict] = {}
+    # One tz-aware instant for the whole run: merge_scd2 refuses an as_of earlier than the
+    # latest stored effective_start_ts, so it must be monotonic across runs.
+    as_of = dt.datetime.now(dt.UTC)
+    params = {"start": start.isoformat(), "end": end.isoformat()}
+
+    with httpx.Client(timeout=settings.request_timeout_s) as client:
+        for name in source_names:
+            source = SOURCES[name]
+            record = manifest.start(name, params)
+            try:
+                result = source.fetch(start, end, assets, client)
+                if result.frame.empty:
+                    raise RuntimeError("source returned no rows")
+
+                write_bronze(settings.resolver, name, end, result.frame, params)
+
+                table, key = SILVER_TABLE[name], KEYS[name]
+                merged = merge_scd2(
+                    _read_silver(settings, table),
+                    result.frame,
+                    key,
+                    _value_cols(result.frame, key),
+                    as_of,
+                )
+                write_silver(settings.resolver, table, merged)
+
+                manifest.finish(record, result.rows_in, len(result.frame), "success")
+                report[name] = {
+                    "status": "success",
+                    "rows_in": result.rows_in,
+                    "rows_out": len(result.frame),
+                }
+            except Exception as exc:  # recorded, not swallowed: see the manifest
+                manifest.finish(record, 0, 0, "failed", error=str(exc))
+                report[name] = {"status": "failed", "error": str(exc)}
+    return report
+
+
+def _volume_anomaly_failures(
+    name: str, table: str, df: pd.DataFrame, contract: Contract
+) -> list[str]:
+    spec = VOLUME_CHECKS.get(name)
+    if spec is None or "metric_date" not in df.columns:
+        return []
+    entity_col, value_cols = spec
+    if entity_col not in df.columns:
+        return []
+    failures: list[str] = []
+    for value_col in value_cols:
+        if value_col not in df.columns:
+            continue
+        for entity, series in df.groupby(entity_col):
+            result = check_volume_anomaly(series, contract, value_col, "metric_date")
+            if not result.passed:
+                failures.append(f"{table}/volume_anomaly[{entity}:{value_col}]: {result.detail}")
+    return failures
+
+
+def run_validate(settings: Settings) -> list[str]:
+    failures: list[str] = []
+    for name, table in SILVER_TABLE.items():
+        history = _read_silver(settings, table)
+        if history.empty:
+            failures.append(f"{table}: no data ingested")
+            continue
+        # Superseded vintages are kept by design; contracts apply to what is current.
+        df = current_view(history)
+        contract = load_contract(SOURCES[name].contract_path)
+        for result in run_checks(df, contract, now=dt.datetime.now(dt.UTC)):
+            if not result.passed:
+                failures.append(f"{table}/{result.name}: {result.detail}")
+        for result in run_identity_checks(df):
+            if not result.passed:
+                failures.append(f"{table}/{result.name}: {result.detail}")
+        failures.extend(_volume_anomaly_failures(name, table, df, contract))
+    return failures
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="cryptoval")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    for cmd in ("ingest", "backfill", "reconcile"):
+        p = sub.add_parser(cmd)
+        p.add_argument("--sources", default=",".join(SOURCES))
+        p.add_argument("--start")
+        p.add_argument("--end")
+        p.add_argument("--trailing-days", type=int)
+    sub.add_parser("validate")
+
+    args = parser.parse_args(argv)
+    settings, assets = load_config()
+    try:
+        assert_unique_symbols(assets)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    if args.command == "validate":
+        failures = run_validate(settings)
+        for f in failures:
+            print(f"FAIL {f}", file=sys.stderr)
+        print("validation passed" if not failures else f"{len(failures)} check(s) failed")
+        return 1 if failures else 0
+
+    names = [s.strip() for s in args.sources.split(",") if s.strip()]
+    unknown = [n for n in names if n not in SOURCES]
+    if unknown:
+        print(f"unknown source(s): {unknown}; known: {sorted(SOURCES)}", file=sys.stderr)
+        return 2
+
+    end = dt.date.fromisoformat(args.end) if args.end else dt.date.today()
+    if args.trailing_days:
+        start = end - dt.timedelta(days=args.trailing_days)
+    elif args.start:
+        start = dt.date.fromisoformat(args.start)
+    else:
+        start = end - dt.timedelta(days=settings.trailing_refetch_days)
+    if start > end:
+        print(f"start {start} is after end {end}", file=sys.stderr)
+        return 2
+
+    if args.command == "reconcile":
+        with httpx.Client(timeout=settings.request_timeout_s) as client:
+            for name in names:
+                result = SOURCES[name].fetch(start, end, assets, client)
+                table, key = SILVER_TABLE[name], KEYS[name]
+                print(
+                    name,
+                    reconcile_report(
+                        _read_silver(settings, table),
+                        result.frame,
+                        key,
+                        _value_cols(result.frame, key),
+                    ),
+                )
+        return 0
+
+    report = run_ingest(settings, assets, names, start, end)
+    for name, outcome in report.items():
+        print(name, outcome)
+    return 0 if all(o["status"] == "success" for o in report.values()) else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

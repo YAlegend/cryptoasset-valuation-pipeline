@@ -9,6 +9,7 @@ that later runs would mistake for complete (Review Focus 5).
 from __future__ import annotations
 
 import datetime as dt
+import os
 import pathlib
 import shutil
 
@@ -62,3 +63,29 @@ def read_bronze(resolver: PathResolver, source: str, ingest_date: dt.date) -> pd
     if not path.exists():
         raise FileNotFoundError(f"no bronze partition at {path}")
     return pd.read_parquet(path)
+
+
+def write_silver(resolver: PathResolver, table: str, df: pd.DataFrame) -> str:
+    """Write a silver table as a single compacted Parquet file.
+
+    Yearly or finer partitioning is unnecessary at this volume and would
+    create the small-file problem the spec warns about (section 7.4); a
+    single file per table keeps DuckDB scans fast and the layout simple.
+    """
+    if resolver.is_remote:
+        raise NotImplementedError("silver writes to object storage are added in Plan 5")
+    out_dir = pathlib.Path(resolver.table("silver", table))
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / "part-0.parquet"
+    # Silver is the system of record, so never delete before the replacement is safely
+    # on disk: write beside it, then swap in a single atomic rename.
+    staging = out_dir / "part-0.parquet.tmp"
+    try:
+        df.to_parquet(staging, index=False)
+        for stale in out_dir.glob("*.parquet"):
+            if stale != path:
+                stale.unlink()
+        os.replace(staging, path)
+    finally:
+        staging.unlink(missing_ok=True)
+    return str(path)
