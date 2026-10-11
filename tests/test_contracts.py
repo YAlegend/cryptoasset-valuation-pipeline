@@ -91,7 +91,7 @@ def test_volume_anomaly_flags_a_tenfold_jump():
     )
     res = check_volume_anomaly(steady, c, "value", "metric_date")
     assert not res.passed
-    assert "1000" in res.detail or "anomal" in res.detail.lower()
+    assert "value=1000" in res.detail
 
 
 def test_volume_anomaly_allows_normal_variation():
@@ -117,3 +117,57 @@ def test_run_checks_aggregates_all_results():
 def test_unknown_contract_path_raises():
     with pytest.raises(FileNotFoundError):
         load_contract("config/contracts/does_not_exist.yml")
+
+
+def test_volume_anomaly_zero_trailing_mean_passes_with_reason():
+    c = load_contract(CONTRACT)
+    zeros = pd.DataFrame(
+        {
+            "metric_date": pd.to_datetime(
+                [f"2026-09-{d:02d}" for d in range(1, 21)], utc=True
+            ),
+            "value": [0.0] * 20,
+        }
+    )
+    res = check_volume_anomaly(zeros, c, "value", "metric_date")
+    assert res.passed and "baseline" in res.detail
+
+
+def test_ranges_fail_on_unparseable_values():
+    c = load_contract(CONTRACT)
+    bad = _frame(CapMrktCurUSD=["N/A", 1.0e12])
+    res = check_ranges(bad, c)
+    assert not res.passed and "CapMrktCurUSD" in res.detail and "N/A" in res.detail
+
+
+def _write(tmp_path, text):
+    p = tmp_path / "c.yml"
+    p.write_text(text, encoding="utf-8")
+    return str(p)
+
+
+def test_typo_in_quality_section_raises(tmp_path):
+    with pytest.raises(ValueError, match="uniquness"):
+        load_contract(_write(tmp_path, "quality:\n  uniquness: {combination: [a]}\n"))
+
+
+def test_typo_in_quality_subkey_raises(tmp_path):
+    with pytest.raises(ValueError, match="max_delay_hour"):
+        load_contract(_write(tmp_path, "quality:\n  freshness: {max_delay_hour: 3}\n"))
+
+
+def test_typo_in_bound_key_raises(tmp_path):
+    text = "schema:\n  columns:\n    x: {type: float, minimumm: 0}\n"
+    with pytest.raises(ValueError, match="minimumm"):
+        load_contract(_write(tmp_path, text))
+
+
+def test_non_numeric_bound_raises(tmp_path):
+    text = "schema:\n  columns:\n    x: {type: float, minimum: abc}\n"
+    with pytest.raises(ValueError, match="numeric"):
+        load_contract(_write(tmp_path, text))
+
+
+def test_quality_notes_allowed(tmp_path):
+    c = load_contract(_write(tmp_path, "quality:\n  notes: free text\n"))
+    assert c.unique_on == []

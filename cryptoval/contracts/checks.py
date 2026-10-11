@@ -46,7 +46,15 @@ def check_ranges(df: pd.DataFrame, contract: Contract) -> CheckResult:
     for col, bounds in contract.ranges.items():
         if col not in df.columns:
             continue
-        series = pd.to_numeric(df[col], errors="coerce").dropna()
+        raw = df[col]
+        numeric = pd.to_numeric(raw, errors="coerce")
+        unparseable = raw.notna() & numeric.isna()
+        if unparseable.any():
+            offenders.append(
+                f"{col} has {int(unparseable.sum())} non-numeric value(s), "
+                f"e.g. {raw[unparseable].iloc[0]!r}"
+            )
+        series = numeric.dropna()
         if "minimum" in bounds and (series < bounds["minimum"]).any():
             offenders.append(f"{col} < {bounds['minimum']}")
         if "maximum" in bounds and (series > bounds["maximum"]).any():
@@ -80,7 +88,9 @@ def check_volume_anomaly(
     safe_trailing = trailing.where(trailing != 0)
     deviation = (values - safe_trailing).abs() / safe_trailing
     worst = deviation.max()
-    if pd.isna(worst) or worst <= threshold:
+    if pd.isna(worst):
+        return CheckResult("volume_anomaly", True, "no valid trailing baseline")
+    if worst <= threshold:
         return CheckResult("volume_anomaly", True, "")
     idx = deviation.idxmax()
     return CheckResult(
