@@ -171,3 +171,29 @@ def test_non_numeric_bound_raises(tmp_path):
 def test_quality_notes_allowed(tmp_path):
     c = load_contract(_write(tmp_path, "quality:\n  notes: free text\n"))
     assert c.unique_on == []
+
+
+def test_unknown_top_level_key_raises(tmp_path):
+    with pytest.raises(ValueError, match="qualty"):
+        load_contract(_write(tmp_path, "qualty:\n  freshness: {max_delay_hours: 3}\n"))
+
+
+def test_unknown_schema_key_raises(tmp_path):
+    with pytest.raises(ValueError, match="requried"):
+        load_contract(_write(tmp_path, "schema:\n  requried: [a]\n"))
+
+
+def test_string_required_raises(tmp_path):
+    with pytest.raises(ValueError, match="schema.required"):
+        load_contract(_write(tmp_path, "schema:\n  required: asset\n"))
+
+
+def test_string_combination_raises(tmp_path):
+    with pytest.raises(ValueError, match="combination"):
+        load_contract(_write(tmp_path, "quality:\n  uniqueness: {combination: id}\n"))
+
+
+def test_non_mapping_column_spec_raises(tmp_path):
+    text = "schema:\n  columns:\n    mcap: float\n"
+    with pytest.raises(ValueError, match="schema.columns.mcap"):
+        load_contract(_write(tmp_path, text))

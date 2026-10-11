@@ -42,17 +42,36 @@ def _reject_unknown(found, allowed: set[str], where: str) -> None:
         raise ValueError(f"unknown key(s) {unknown} in {where}; allowed: {sorted(allowed)}")
 
 
+def _mapping(value: Any, where: str) -> dict[str, Any]:
+    value = {} if value is None else value
+    if not isinstance(value, dict):
+        raise ValueError(f"{where} must be a mapping, got {type(value).__name__}: {value!r}")
+    return value
+
+
 def _validate(raw: dict[str, Any], source: str) -> None:
-    quality = raw.get("quality", {}) or {}
+    _reject_unknown(raw, {"contract", "schema", "quality", "versioning"}, f"top level of {source}")
+    schema = _mapping(raw.get("schema"), f"schema of {source}")
+    _reject_unknown(schema, {"required", "columns"}, f"schema of {source}")
+    required = schema.get("required")
+    if required is not None and not isinstance(required, list):
+        raise ValueError(f"schema.required of {source} must be a list, got {required!r}")
+    quality = _mapping(raw.get("quality"), f"quality of {source}")
     _reject_unknown(quality, set(_QUALITY_KEYS), f"quality of {source}")
     for section, allowed in _QUALITY_KEYS.items():
         if allowed is None or section not in quality:
             continue
-        body = quality[section] or {}
-        _reject_unknown(body, allowed, f"quality.{section} of {source}")
-    columns = (raw.get("schema", {}) or {}).get("columns", {}) or {}
+        where = f"quality.{section} of {source}"
+        body = _mapping(quality[section], where)
+        _reject_unknown(body, allowed, where)
+    combination = _mapping(quality.get("uniqueness"), "quality.uniqueness").get("combination")
+    if combination is not None and not isinstance(combination, list):
+        raise ValueError(
+            f"quality.uniqueness.combination of {source} must be a list, got {combination!r}"
+        )
+    columns = _mapping(schema.get("columns"), f"schema.columns of {source}")
     for col, spec in columns.items():
-        spec = spec or {}
+        spec = _mapping(spec, f"schema.columns.{col} of {source}")
         _reject_unknown(spec, _COLUMN_KEYS, f"schema.columns.{col} of {source}")
         for bound in ("minimum", "maximum"):
             if bound in spec:
