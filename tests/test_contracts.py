@@ -37,15 +37,15 @@ def test_loads_contract_metadata():
     assert c.unique_on == ["asset", "metric_date"]
     assert c.freshness_max_delay_hours == 48
     assert c.volume_anomaly_threshold == 0.5
-    assert "CapMrktCurUSD" in c.required_columns
+    assert c.required_columns == ["asset", "metric_date"]
 
 
 def test_required_columns_pass_and_fail():
     c = load_contract(CONTRACT)
     assert check_required_columns(_frame(), c).passed
-    bad = _frame().drop(columns=["CapMrktCurUSD"])
+    bad = _frame().drop(columns=["metric_date"])
     res = check_required_columns(bad, c)
-    assert not res.passed and "CapMrktCurUSD" in res.detail
+    assert not res.passed and "metric_date" in res.detail
 
 
 def test_uniqueness_detects_duplicate_keys():
@@ -59,7 +59,7 @@ def test_uniqueness_detects_duplicate_keys():
 def test_not_null_on_required_columns():
     c = load_contract(CONTRACT)
     bad = _frame()
-    bad.loc[0, "CapMrktCurUSD"] = None
+    bad.loc[0, "asset"] = None
     assert not check_not_null(bad, c).passed
 
 
@@ -197,3 +197,44 @@ def test_non_mapping_column_spec_raises(tmp_path):
     text = "schema:\n  columns:\n    mcap: float\n"
     with pytest.raises(ValueError, match="schema.columns.mcap"):
         load_contract(_write(tmp_path, text))
+
+
+# ---- Fix round 1: contract calibration against live vendor behaviour -----
+
+COINGECKO_CONTRACT = "config/contracts/coingecko_market_chart.yml"
+DEFILLAMA_CONTRACT = "config/contracts/defillama_fees.yml"
+
+
+def test_coingecko_contract_carries_a_volume_anomaly_threshold():
+    """Ruling C: the wired guard checks nothing without a threshold."""
+    assert load_contract(COINGECKO_CONTRACT).volume_anomaly_threshold == 0.5
+
+
+def test_market_cap_is_not_required_because_coin_metrics_omits_it():
+    """Ruling E: 6,623 live rows have no CapMrktCurUSD; the vendor simply omits it."""
+    c = load_contract(CONTRACT)
+    assert "CapMrktCurUSD" not in c.required_columns
+    assert c.required_columns == ["asset", "metric_date"]
+    missing_cap = _frame()
+    missing_cap.loc[0, "CapMrktCurUSD"] = None
+    assert check_not_null(missing_cap, c).passed
+
+
+def test_a_negative_market_cap_still_fails_after_the_not_null_relaxation():
+    c = load_contract(CONTRACT)
+    assert not check_ranges(_frame(CapMrktCurUSD=[-1.0, 1.0e12]), c).passed
+
+
+def test_coin_metrics_contract_declares_reported_spot_volume():
+    """Ruling B: the free full-history source of the equation-of-exchange T term."""
+    assert "volume_reported_spot_usd_1d" in load_contract(CONTRACT).ranges
+
+
+def test_defillama_fees_are_not_required_but_negative_fees_still_fail():
+    """Rulings F and H: 383 protocols report no fees; 12 report negative fees."""
+    c = load_contract(DEFILLAMA_CONTRACT)
+    assert "total_fees_24h" not in c.required_columns
+    frame = pd.DataFrame({"protocol": ["A", "B"], "total_fees_24h": [None, 10.0]})
+    assert check_not_null(frame, c).passed
+    negative = pd.DataFrame({"protocol": ["A"], "total_fees_24h": [-2803.0]})
+    assert not check_ranges(negative, c).passed

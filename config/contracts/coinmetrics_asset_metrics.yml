@@ -5,10 +5,12 @@ contract:
   source_url: https://community-api.coinmetrics.io/v4
 
 schema:
+  # CapMrktCurUSD is NOT required: Coin Metrics legitimately omits it (6,623 rows on
+  # 2026-10-11, e.g. BNB and DOT), so requiring it failed the gate on normal vendor
+  # behaviour. The range bound and the identity checks still apply (fix round 1, Ruling E).
   required:
     - asset
     - metric_date
-    - CapMrktCurUSD
   columns:
     asset: {type: string}
     metric_date: {type: date}
@@ -21,6 +23,10 @@ schema:
     TxCnt: {type: float, minimum: 0}
     SplyCur: {type: float, minimum: 0}
     PriceUSD: {type: float, minimum: 0}
+    # Reported spot volume, the equation-of-exchange T term. This is Coin Metrics'
+    # reported-exchange construction, NOT CoinGecko's total_volume: different exchange
+    # coverage, so the two series are not interchangeable (fix round 1, Ruling B).
+    volume_reported_spot_usd_1d: {type: float, minimum: 0}
 
 quality:
   freshness:

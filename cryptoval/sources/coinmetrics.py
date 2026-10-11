@@ -35,6 +35,10 @@ FREE_METRICS: tuple[str, ...] = (
     "TxTfrCnt",
     "FlowInExUSD",
     "FlowOutExUSD",
+    # Reported spot volume: free on the community tier back to 2015 and therefore the
+    # full-history source of the equation-of-exchange T term, which CoinGecko's keyless
+    # API cannot serve beyond 365 days (fix round 1, Ruling B).
+    "volume_reported_spot_usd_1d",
 )
 
 _NON_METRIC_COLUMNS = {"asset", "time", "metric_date"}

@@ -19,6 +19,19 @@ from cryptoval.sources.base import FetchResult, get_with_retry
 
 BASE_URL = "https://api.llama.fi"
 OVERVIEW_PATH = "/overview/fees?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true"
+# The fees overview carries no revenue field: net protocol revenue is the SAME endpoint
+# under a different dataType, and reading revenue24h off the fees payload left the column
+# 100% null on live data (fix round 1, Ruling G).
+REVENUE_PATH = OVERVIEW_PATH + "&dataType=dailyRevenue"
+
+FEE_COLUMNS = ["protocol", "total_fees_24h", "total_fees_30d", "methodology_hash"]
+PANEL_COLUMNS = [
+    "protocol",
+    "total_fees_24h",
+    "total_fees_30d",
+    "net_revenue_24h",
+    "methodology_hash",
+]
 
 
 def methodology_hash(record: dict) -> str:
@@ -26,32 +39,36 @@ def methodology_hash(record: dict) -> str:
 
 
 def parse_fees_overview(payload: dict) -> pd.DataFrame:
-    rows = []
-    for record in payload.get("protocols", []) or []:
-        rows.append(
-            {
-                "protocol": record.get("name"),
-                "total_fees_24h": record.get("total24h"),
-                "total_fees_30d": record.get("total30d"),
-                "net_revenue_24h": record.get("revenue24h"),
-                "methodology_hash": methodology_hash(record),
-            }
-        )
+    rows = [
+        {
+            "protocol": record.get("name"),
+            "total_fees_24h": record.get("total24h"),
+            "total_fees_30d": record.get("total30d"),
+            "methodology_hash": methodology_hash(record),
+        }
+        for record in payload.get("protocols", []) or []
+    ]
     df = pd.DataFrame(rows)
     if df.empty:
-        return pd.DataFrame(
-            columns=[
-                "protocol",
-                "total_fees_24h",
-                "total_fees_30d",
-                "net_revenue_24h",
-                "methodology_hash",
-            ]
-        )
-    for col in ("total_fees_24h", "total_fees_30d", "net_revenue_24h"):
-        # A null revenue stays null. It is not the same as zero revenue, and
-        # it is certainly not gross fees.
+        return pd.DataFrame(columns=FEE_COLUMNS)
+    for col in ("total_fees_24h", "total_fees_30d"):
+        # A null stays null. It is not the same as zero.
         df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df
+
+
+def parse_revenue_overview(payload: dict) -> pd.DataFrame:
+    """Net protocol revenue per protocol, from the dailyRevenue dataType."""
+    rows = [
+        {"protocol": record.get("name"), "net_revenue_24h": record.get("total24h")}
+        for record in payload.get("protocols", []) or []
+    ]
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return pd.DataFrame(columns=["protocol", "net_revenue_24h"])
+    # A null revenue stays null. It is not the same as zero revenue, and it is
+    # certainly not gross fees.
+    df["net_revenue_24h"] = pd.to_numeric(df["net_revenue_24h"], errors="coerce")
     return df
 
 
@@ -70,7 +87,23 @@ class DefiLlamaSource:
         client: httpx.Client,
     ) -> FetchResult:
         payload = get_with_retry(client, f"{BASE_URL}{OVERVIEW_PATH}", max_retries=self.max_retries)
+        # rows_in counts the fees payload only: that is the row spine, and revenue is an
+        # enrichment joined onto it, so rows_in stays comparable with rows_out.
         rows_in = len(payload.get("protocols", []) or [])
-        frame = parse_fees_overview(payload)
+        fees = parse_fees_overview(payload)
+
+        errors: list[str] = []
+        try:
+            revenue = parse_revenue_overview(
+                get_with_retry(
+                    client, f"{BASE_URL}{REVENUE_PATH}", max_retries=self.max_retries
+                )
+            )
+        except httpx.HTTPError as exc:
+            # Fees are usable without revenue; losing both to one failed call is not.
+            errors.append(f"dailyRevenue (net_revenue_24h): {exc}")
+            revenue = pd.DataFrame(columns=["protocol", "net_revenue_24h"])
+
+        frame = fees.merge(revenue, on="protocol", how="left").reindex(columns=PANEL_COLUMNS)
         frame["metric_date"] = pd.Timestamp(end, tz="UTC").normalize()
-        return FetchResult(frame, rows_in)
+        return FetchResult(frame, rows_in, tuple(errors))

@@ -12,6 +12,7 @@ import datetime as dt
 import time
 
 import httpx
+import numpy as np
 import pandas as pd
 
 from cryptoval.config import Asset
@@ -66,28 +67,44 @@ class CoinGeckoSource:
         client: httpx.Client,
     ) -> FetchResult:
         frames: list[pd.DataFrame] = []
+        errors: list[str] = []
         rows_in = 0
         for asset in assets:
             if not asset.gecko_id:
                 continue
-            payload = get_with_retry(
-                client,
-                f"{BASE_URL}/coins/{asset.gecko_id}/market_chart/range",
-                {
-                    "vs_currency": "usd",
-                    "from": int(dt.datetime.combine(start, dt.time.min, tzinfo=dt.UTC).timestamp()),
-                    "to": int(dt.datetime.combine(end, dt.time.max, tzinfo=dt.UTC).timestamp()),
-                },
-                max_retries=self.max_retries,
-                initial_delay=2.0,
-            )
+            try:
+                payload = get_with_retry(
+                    client,
+                    f"{BASE_URL}/coins/{asset.gecko_id}/market_chart/range",
+                    {
+                        "vs_currency": "usd",
+                        "from": int(
+                            dt.datetime.combine(start, dt.time.min, tzinfo=dt.UTC).timestamp()
+                        ),
+                        "to": int(
+                            dt.datetime.combine(end, dt.time.max, tzinfo=dt.UTC).timestamp()
+                        ),
+                    },
+                    max_retries=self.max_retries,
+                    initial_delay=2.0,
+                )
+            except httpx.HTTPError as exc:
+                # Nothing fetched yet: fail loudly. Otherwise keep what succeeded and stop —
+                # a rate limit does not clear by moving on to the next asset, and a full pass
+                # over the free tier takes minutes to redo (fix round 1, Ruling D).
+                if not frames:
+                    raise
+                errors.append(f"{asset.gecko_id}: {exc}")
+                break
             rows_in += len(payload.get("prices", []) or [])
             frames.append(parse_market_chart(payload, asset.gecko_id))
             time.sleep(self.sleep_between_assets_s)  # Demo tier is rate limited
 
         if not frames:
             return FetchResult(pd.DataFrame(columns=PANEL_COLUMNS), 0)
-        return FetchResult(compute_velocity(pd.concat(frames, ignore_index=True)), rows_in)
+        return FetchResult(
+            compute_velocity(pd.concat(frames, ignore_index=True)), rows_in, tuple(errors)
+        )
 
 
 class EquitySource:
@@ -117,7 +134,9 @@ class EquitySource:
             .rename(columns={closes.index.name or "Date": "metric_date"})
         )
         tidy["metric_date"] = pd.to_datetime(tidy["metric_date"], utc=True).dt.normalize()
-        tidy["market_cap_usd"] = pd.NA
-        tidy["volume_usd"] = pd.NA
+        # np.nan, not pd.NA: these are float columns, and stable_hash (and therefore
+        # SCD2 change detection) cannot encode NAType (fix round 1, Ruling A).
+        tidy["market_cap_usd"] = np.nan
+        tidy["volume_usd"] = np.nan
         frame = tidy.reindex(columns=PANEL_COLUMNS).dropna(subset=["price_usd"])
         return FetchResult(frame, len(frame))

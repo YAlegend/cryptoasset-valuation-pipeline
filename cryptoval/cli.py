@@ -48,6 +48,7 @@ KEYS = {
 VOLUME_CHECKS = {
     "defillama": ("protocol", ["total_fees_24h", "net_revenue_24h"]),
     "coingecko": ("asset", ["volume_usd"]),
+    "coinmetrics": ("asset", ["volume_reported_spot_usd_1d"]),
 }
 
 
@@ -106,12 +107,24 @@ def run_ingest(
                 )
                 write_silver(settings.resolver, table, merged)
 
-                manifest.finish(record, result.rows_in, len(result.frame), "success")
+                # A source that survived some failures ingested real rows, but not all of
+                # them: "partial" so neither the manifest nor the exit code calls it a
+                # success (fix round 1, Ruling D).
+                status = "partial" if result.errors else "success"
+                manifest.finish(
+                    record,
+                    result.rows_in,
+                    len(result.frame),
+                    status,
+                    error="; ".join(result.errors) or None,
+                )
                 report[name] = {
-                    "status": "success",
+                    "status": status,
                     "rows_in": result.rows_in,
                     "rows_out": len(result.frame),
                 }
+                if result.errors:
+                    report[name]["errors"] = list(result.errors)
             except Exception as exc:  # recorded, not swallowed: see the manifest
                 manifest.finish(record, 0, 0, "failed", error=str(exc))
                 report[name] = {"status": "failed", "error": str(exc)}

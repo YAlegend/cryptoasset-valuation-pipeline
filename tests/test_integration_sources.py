@@ -40,3 +40,20 @@ def test_defillama_still_exposes_fees_and_methodology():
         result = DefiLlamaSource().fetch(START, END, [], client)
     assert len(result.frame) > 100
     assert result.frame["methodology_hash"].str.len().eq(64).all()
+
+
+def test_defillama_serves_net_revenue_distinctly_from_gross_fees():
+    """Ruling G: the fees overview has no revenue field, so revenue needs its own call.
+
+    If this fails, net_revenue_24h is silently all-null again and every revenue
+    multiple built on it is meaningless (spec section 10.4).
+    """
+    with httpx.Client(timeout=30, follow_redirects=True) as client:
+        result = DefiLlamaSource().fetch(START, END, [], client)
+    assert result.errors == ()
+    assert result.frame["net_revenue_24h"].notna().sum() > 100
+    both = result.frame.dropna(subset=["total_fees_24h", "net_revenue_24h"])
+    assert (both["total_fees_24h"] != both["net_revenue_24h"]).any(), (
+        "net revenue is identical to gross fees on every protocol: the revenue call "
+        "is probably returning the fees payload"
+    )

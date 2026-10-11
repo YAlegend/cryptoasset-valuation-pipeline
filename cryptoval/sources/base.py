@@ -15,6 +15,10 @@ from cryptoval.config import Asset
 class FetchResult:
     frame: pd.DataFrame
     rows_in: int
+    # Per-item failures a source survived. A non-empty errors with a non-empty frame is a
+    # PARTIAL fetch: the rows present are real, and what is missing is named here rather
+    # than discarded (fix round 1, Ruling D).
+    errors: tuple[str, ...] = ()
 
 
 @runtime_checkable

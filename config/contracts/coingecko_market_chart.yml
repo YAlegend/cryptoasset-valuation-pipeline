@@ -21,3 +21,5 @@ quality:
     max_delay_hours: 48
   uniqueness:
     combination: [asset, metric_date]
+  volume:
+    anomaly_threshold: 0.5       # +/-50% vs trailing average (spec section 9.2)

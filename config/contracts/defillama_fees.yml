@@ -5,9 +5,11 @@ contract:
   source_url: https://api.llama.fi
 
 schema:
+  # total_fees_24h is NOT required: 383 of 2,991 listed protocols report no 24h fees
+  # (fix round 1, Ruling H). A NEGATIVE fee still fails the range bound below, by
+  # design — that is a real data-quality signal, not a miscalibration (Ruling F).
   required:
     - protocol
-    - total_fees_24h
   columns:
     protocol: {type: string}
     total_fees_24h: {type: float, minimum: 0}

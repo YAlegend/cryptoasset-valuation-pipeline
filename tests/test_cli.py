@@ -251,3 +251,86 @@ def test_validate_names_table_check_and_detail_and_main_exits_nonzero(
 def test_validate_reports_a_missing_table(tmp_path, monkeypatch):
     failures = run_validate(_validate_settings(tmp_path, monkeypatch, "coinmetrics"))
     assert failures == ["asset_metrics: no data ingested"]
+
+
+# Fix round 1, Ruling D: a partial fetch is neither a success nor a total loss
+
+
+class _Partial:
+    name = "coingecko"
+    contract_path = "config/contracts/coingecko_market_chart.yml"
+
+    def fetch(self, start, end, assets, client):
+        frame = pd.DataFrame(
+            {
+                "asset": ["bitcoin"],
+                "metric_date": pd.to_datetime(["2026-10-09"], utc=True),
+                "price_usd": [87000.0],
+            }
+        )
+        return FetchResult(frame, 1, ("ethereum: 429 Too Many Requests",))
+
+
+def test_run_ingest_keeps_partial_rows_and_records_the_status_and_error(tmp_path, monkeypatch):
+    monkeypatch.setitem(SOURCES, "coingecko", _Partial())
+    settings = Settings(data_root=str(tmp_path))
+    report = run_ingest(
+        settings, [], ["coingecko"], dt.date(2026, 10, 1), dt.date(2026, 10, 11)
+    )
+    assert report["coingecko"]["status"] == "partial"
+    assert report["coingecko"]["errors"] == ["ethereum: 429 Too Many Requests"]
+    silver = pd.read_parquet(tmp_path / "silver" / "market_chart" / "part-0.parquet")
+    assert silver["asset"].tolist() == ["bitcoin"]
+    manifest = (tmp_path / "gold" / "run_manifest.jsonl").read_text()
+    assert '"status": "partial"' in manifest
+    assert "ethereum: 429" in manifest
+
+
+def test_main_exits_nonzero_when_an_ingest_is_only_partial(tmp_path, monkeypatch):
+    monkeypatch.setitem(SOURCES, "coingecko", _Partial())
+    settings = Settings(data_root=str(tmp_path))
+    monkeypatch.setattr(cli, "load_config", lambda: (settings, []))
+    assert main(["ingest", "--sources", "coingecko"]) == 1
+
+
+# Fix round 1, Rulings B and C: the volume guard must actually bite
+
+
+def _panel(table_rows, value_col):
+    return pd.DataFrame(
+        [
+            {
+                "asset": a,
+                "metric_date": pd.Timestamp(d, tz="UTC"),
+                "CapMrktCurUSD": 1.0e12,
+                value_col: v,
+            }
+            for a, d, v in table_rows
+        ]
+    )
+
+
+def _steady_then_spike(entity, value_col, spike=10_000.0):
+    rows = [(entity, f"2026-10-0{d}", 100.0) for d in range(1, 6)]
+    rows.append((entity, "2026-10-06", spike))
+    return _panel(rows, value_col)
+
+
+def test_validate_flags_an_anomalous_coin_metrics_reported_volume(tmp_path, monkeypatch):
+    frame = _steady_then_spike("btc", "volume_reported_spot_usd_1d")
+    _publish(tmp_path, "asset_metrics", frame, ["asset", "metric_date"])
+    failures = run_validate(_validate_settings(tmp_path, monkeypatch, "coinmetrics"))
+    anomalies = [f for f in failures if "volume_anomaly" in f]
+    assert len(anomalies) == 1
+    assert anomalies[0].startswith(
+        "asset_metrics/volume_anomaly[btc:volume_reported_spot_usd_1d]: "
+    )
+
+
+def test_validate_flags_an_anomalous_coingecko_volume(tmp_path, monkeypatch):
+    frame = _steady_then_spike("bitcoin", "volume_usd")
+    _publish(tmp_path, "market_chart", frame, ["asset", "metric_date"])
+    failures = run_validate(_validate_settings(tmp_path, monkeypatch, "coingecko"))
+    anomalies = [f for f in failures if "volume_anomaly" in f]
+    assert len(anomalies) == 1
+    assert anomalies[0].startswith("market_chart/volume_anomaly[bitcoin:volume_usd]: ")

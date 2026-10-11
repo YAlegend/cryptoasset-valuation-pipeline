@@ -8,6 +8,7 @@ import pytest
 import yfinance
 
 from cryptoval.config import Asset
+from cryptoval.scd2 import merge_scd2
 from cryptoval.sources.prices import (
     CoinGeckoSource,
     EquitySource,
@@ -246,3 +247,62 @@ def test_negative_market_cap_gives_nan_velocity():
 def test_negative_volume_gives_nan_holding_time():
     df = pd.DataFrame({"market_cap_usd": [1000.0], "volume_usd": [-5.0]})
     assert np.isnan(compute_velocity(df)["holding_time_days"].iloc[0])
+
+
+# ---- Fix round 1, Ruling A: equity rows must be hashable -----------------
+
+
+def test_equity_rows_merge_into_scd2_rather_than_raising_on_a_missing_value(monkeypatch):
+    """pd.NA is unhashable by stable_hash, which made the equity source dead on arrival."""
+    monkeypatch.setattr(yfinance, "download", lambda tickers, **kwargs: _yf_frame())
+    result = EquitySource().fetch(
+        START, END, [_equity("AAPL", "AAPL"), _equity("SPY", "SPY")], client=None
+    )
+    merged = merge_scd2(
+        pd.DataFrame(),
+        result.frame,
+        ["asset", "metric_date"],
+        ["price_usd", "market_cap_usd", "volume_usd"],
+        dt.datetime(2026, 10, 11, tzinfo=dt.UTC),
+    )
+    assert len(merged) == 5
+    assert merged["row_hash"].notna().all()
+
+
+# ---- Fix round 1, Ruling D: a rate limit must not discard earlier assets --
+
+
+def _gecko_handler(load_fixture, failing: set[str], status: int = 429):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if any(name in request.url.path for name in failing):
+            return httpx.Response(status)
+        return httpx.Response(200, json=load_fixture("coingecko_btc_market_chart.json"))
+
+    return handler
+
+
+def test_fetch_keeps_assets_already_fetched_when_a_later_one_rate_limits(load_fixture, sleeps):
+    requests: list[httpx.Request] = []
+    client = _client(_gecko_handler(load_fixture, {"ethereum"}), requests)
+    result = CoinGeckoSource(max_retries=2).fetch(
+        START, END, [_asset("BTC", "bitcoin"), _asset("ETH", "ethereum")], client
+    )
+    assert set(result.frame["asset"]) == {"bitcoin"}
+    assert len(result.frame) == 3
+    assert len(result.errors) == 1
+    assert "ethereum" in result.errors[0]
+
+
+def test_fetch_stops_at_the_first_failure_rather_than_hammering_the_rest(load_fixture, sleeps):
+    requests: list[httpx.Request] = []
+    client = _client(_gecko_handler(load_fixture, {"ethereum"}), requests)
+    assets = [_asset("BTC", "bitcoin"), _asset("ETH", "ethereum"), _asset("ADA", "cardano")]
+    CoinGeckoSource(max_retries=2).fetch(START, END, assets, client)
+    assert [r.url.path.split("/")[4] for r in requests] == ["bitcoin", "ethereum", "ethereum"]
+
+
+def test_a_successful_fetch_reports_no_errors(load_fixture, sleeps):
+    requests: list[httpx.Request] = []
+    client = _client(_gecko_handler(load_fixture, set()), requests)
+    result = CoinGeckoSource().fetch(START, END, [_asset("BTC", "bitcoin")], client)
+    assert result.errors == ()

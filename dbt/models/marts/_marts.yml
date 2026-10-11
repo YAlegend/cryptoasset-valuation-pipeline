@@ -13,8 +13,15 @@ models:
       - name: metric_date
         tests: [not_null]
       - name: market_cap_usd
+        description: >
+          NULL where Coin Metrics publishes no market cap for the asset-day (6,623 rows
+          on 2026-10-11, e.g. BNB and DOT). The not_null test is therefore a WARNING,
+          not an error: a genuine market-cap outage shows up as a rising warn count,
+          while the blocking tripwires are the range bound and the identity checks.
         tests:
-          - not_null
+          - not_null:
+              config:
+                severity: warn
           - dbt_utils.accepted_range:
               arguments:
                 min_value: 0
@@ -36,9 +43,10 @@ models:
       - name: thermocap_has_gap
         description: >
           True from the first row where issuance_usd, fees_native or price_usd was
-          NULL, and on every later row for that asset. When true, thermocap_usd,
-          mvtv and investor_cap_usd are lower-bound-affected and must not be read
-          as exact.
+          NULL, and on every later row for that asset. When true thermocap_usd is a
+          LOWER bound, so mvtv (market cap / thermocap) and investor_cap_usd
+          (realized_cap - thermocap) are both biased UPWARD and must not be read as
+          exact.
         tests: [not_null]
 
   - name: dim_date

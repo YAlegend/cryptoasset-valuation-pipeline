@@ -16,6 +16,10 @@ select
     "FeeTotNtv"                    as fees_native,
     "AdrActCnt"                    as active_addresses,
     "TxCnt"                        as tx_count,
+    -- Coin Metrics' REPORTED SPOT volume (the equation-of-exchange T term), not
+    -- CoinGecko's total_volume: different exchange coverage, so the two are not
+    -- interchangeable series (fix round 1, Ruling B).
+    "volume_reported_spot_usd_1d"  as volume_reported_spot_usd,
     effective_start_ts,
     effective_end_ts,
     row_hash

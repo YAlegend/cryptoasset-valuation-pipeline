@@ -216,3 +216,11 @@ def test_fetch_fails_fast_on_403_without_retry(sleeps):
         CoinMetricsSource().fetch(START, END, [_asset("BTC", "btc")], client)
     assert len(requests) == 1
     assert sleeps == []
+
+
+def test_fetch_requests_reported_spot_volume(load_fixture):
+    """Ruling B: the free, full-history equation-of-exchange T term."""
+    requests: list[httpx.Request] = []
+    client = _client(lambda r: httpx.Response(200, json={"data": []}), requests)
+    CoinMetricsSource().fetch(START, END, [_asset("BTC", "btc")], client)
+    assert "volume_reported_spot_usd_1d" in requests[0].url.params["metrics"].split(",")
