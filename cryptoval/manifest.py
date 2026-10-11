@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import pathlib
 import subprocess
 import uuid
@@ -79,13 +80,14 @@ class RunManifest:
         }
         self._path.parent.mkdir(parents=True, exist_ok=True)
         with self._path.open("a", encoding="utf-8") as fh:
-            fh.write(pd.Series(row).to_json() + "\n")
+            fh.write(json.dumps(row, default=str) + "\n")
 
     def read(self) -> pd.DataFrame:
         if not self._path.exists():
             return pd.DataFrame(columns=COLUMNS)
-        df = pd.read_json(self._path, lines=True, convert_dates=False)
-        return df.reindex(columns=COLUMNS)
+        with self._path.open(encoding="utf-8") as fh:
+            rows = [json.loads(line) for line in fh if line.strip()]
+        return pd.DataFrame(rows, columns=COLUMNS)
 
     def bytes_scanned_in_month(self, year: int, month: int) -> int:
         df = self.read()

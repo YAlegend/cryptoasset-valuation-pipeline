@@ -1,5 +1,8 @@
 import datetime as dt
 
+import numpy as np
+import pytest
+
 from cryptoval.hashing import stable_hash
 from cryptoval.manifest import RunManifest
 from cryptoval.paths import PathResolver
@@ -58,3 +61,35 @@ def test_read_on_empty_manifest_returns_empty_frame(tmp_path):
     df = m.read()
     assert df.empty
     assert "status" in df.columns
+
+
+def test_all_digit_git_sha_stays_a_string(tmp_path, monkeypatch):
+    monkeypatch.setattr("cryptoval.manifest._git_sha", lambda: "1234567")
+    m = RunManifest(PathResolver(str(tmp_path)))
+    m.finish(m.start("x", {}), rows_in=1, rows_out=1, status="success")
+    sha = m.read().loc[0, "git_sha"]
+    assert isinstance(sha, str)
+    assert sha == "1234567"
+
+
+def test_error_is_none_not_nan_after_successful_run(tmp_path):
+    m = RunManifest(PathResolver(str(tmp_path)))
+    m.finish(m.start("x", {"n": {"k": 1}}), rows_in=1, rows_out=1, status="success")
+    df = m.read()
+    assert df.loc[0, "error"] is None
+    assert df.loc[0, "params"] == {"n": {"k": 1}}
+
+
+def test_stable_hash_tagged_date_does_not_collide_with_string():
+    assert stable_hash(dt.date(2026, 1, 1)) != stable_hash("2026-01-01")
+    assert stable_hash(dt.datetime(2026, 1, 1, tzinfo=dt.UTC)) != stable_hash(dt.date(2026, 1, 1))
+
+
+def test_stable_hash_numpy_scalars_match_python_primitives():
+    assert stable_hash(np.float64(1.5)) == stable_hash(1.5)
+    assert stable_hash({"a": np.int64(3)}) == stable_hash({"a": 3})
+
+
+def test_stable_hash_rejects_unsupported_types():
+    with pytest.raises(TypeError, match="set"):
+        stable_hash({"a": {"x", "y"}})
