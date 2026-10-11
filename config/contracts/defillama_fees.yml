@@ -24,3 +24,6 @@ quality:
     methodology_hash fingerprints DefiLlama's own per-protocol methodology
     text. A change to it means the revenue series has been redefined and the
     history is no longer comparable (spec section 9.2).
+    This is a text fingerprint, not a definition fingerprint: it covers only the
+    free-text methodology field, so a change to DefiLlama's underlying computation,
+    methodologyURL or revenue breakdown fields is not detected by it.
