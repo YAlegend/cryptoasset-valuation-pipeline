@@ -55,21 +55,8 @@ internal backoff cannot clear a limit that the pass itself keeps re-tripping.
 
 **Act:** the default is now `6.0` (about 10 calls a minute), so a 24-asset pass
 takes roughly 2.5 minutes before any retry. That is the remedy step 1 above
-prescribes. If 429s return, raise it again rather than retrying at the old pace.
-
-## The keyless ceiling tightened (2026-10-12)
-
-**Symptom:** `make ingest` returned `status: partial` with HTTP 429 on three
-consecutive attempts, failing at roughly asset 2, 21 and 21 of 24, the third after
-a seven-minute backoff.
-
-The previous default, `sleep_between_assets_s = 2.5` (about 24 calls a minute), is
-no longer sustained by the keyless tier, and the adapter's own 62 seconds of
-internal backoff cannot clear a limit that the pass itself keeps re-tripping.
-
-**Act:** the default is now `6.0` (about 10 calls a minute), so a 24-asset pass
-takes roughly 2.5 minutes before any retry. That is the remedy step 1 above
-prescribes. If 429s return, raise it again rather than retrying at the old pace.
+prescribes. 429s did still return at this pace: the next section records what was
+measured and what it means.
 
 ## Measured: even 6 s pacing clears only part of a 24-asset pass (2026-10-12)
 

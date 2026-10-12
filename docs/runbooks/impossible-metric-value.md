@@ -61,7 +61,9 @@ previous 30, and fires at `anomaly_threshold: 5.0`, meaning a deviation above +5
   (BCH +246x, DOGE +102x, MANA +89x). Latest-observation counts at each candidate
   (asset_metrics 25 ids, market_chart 24 ids): `0.5` -> 13 and 8 warnings; `5.0` -> 0 and 0;
   `10.0` -> 0 and 0. `5.0` is the lowest candidate that leaves normal operation quiet while
-  still catching every documented event with a wide margin.
+  still catching every documented event with a wide margin. DefiLlama's threshold could not be
+  measured: `protocol_revenue` holds about three days per protocol, below the check's 5-row minimum,
+  so it is inert there and its `5.0` is unvalidated until the history deepens.
 
 **The narrowing is deliberate, not an oversight.** An anomaly in the *middle* of a multi-day
 ingest is no longer flagged by this check. That is acceptable because the check is
@@ -72,4 +74,9 @@ warning. The hard protection no longer rests here.
 **Known gap: this is a spike-only detector.** The deviation is `|x - trailing| / trailing`, so
 a collapse cannot exceed 1.0: a vendor silently returning near-zero volume scores about 1.0,
 which warned at `0.5` and does not at `5.0`. On the live panel `trx_eth` (a near-dead
-wrapper) scores exactly 1.0 on its latest day. A separate collapse signal is not built here.
+wrapper) scores exactly 1.0 on its latest day. There is a second blind path: `safe_trailing` treats a trailing mean of zero as unknown, so a
+series whose previous 30 observations are all zero yields no deviation and the check returns
+*passed* with the detail "no valid trailing baseline". A sustained vendor zero therefore does not
+merely score below the threshold, it passes under a label an operator would read as "insufficient
+data" rather than "collapsed". Whoever builds the deferred collapse signal must cover both paths.
+A separate collapse signal is not built here.

@@ -593,3 +593,53 @@ def test_an_unmapped_coingecko_id_only_warns_too(tmp_path, monkeypatch):
     report = run_validate(_validate_settings(tmp_path, monkeypatch, "coingecko"), _UNIVERSE)
     assert [w for w in report.warnings if "[unmapped: old-token]" in w]
     assert not [f for f in report.failures if "ranges" in f]
+
+
+def _mvrv_violation(entity):
+    """realized_cap deliberately disagrees with market_cap / mvrv (100 / 2 = 50, not 7)."""
+    return pd.DataFrame(
+        {
+            "asset": [entity],
+            "metric_date": pd.to_datetime(["2026-10-09"], utc=True),
+            "CapMrktCurUSD": [100.0],
+            "CapMVRVCur": [2.0],
+            "realized_cap": [7.0],
+        }
+    )
+
+
+def test_an_identity_violation_warns_for_an_unmapped_id_and_blocks_for_a_configured_one(
+    tmp_path, monkeypatch
+):
+    """The identity checks are blocking tripwires (identities.py), so scoping must not make
+    them vanish for an id config no longer maps: warn there, block here."""
+    settings = _validate_settings(tmp_path, monkeypatch, "coinmetrics")
+
+    _publish(tmp_path, "asset_metrics", _mvrv_violation("trx_eth"), ["asset", "metric_date"])
+    report = run_validate(settings, _UNIVERSE)
+    assert not [f for f in report.failures if "identity_mvrv" in f]
+    warned = [w for w in report.warnings if "identity_mvrv [unmapped: trx_eth]" in w]
+    assert len(warned) == 1
+
+    _publish(tmp_path, "asset_metrics", _mvrv_violation("btc"), ["asset", "metric_date"])
+    report = run_validate(settings, _UNIVERSE)
+    assert [f for f in report.failures if "asset_metrics/identity_mvrv" in f]
+    assert not [w for w in report.warnings if "identity_mvrv" in w]
+
+
+def test_an_unmapped_protocols_volume_spike_warns_behind_the_marker(tmp_path, monkeypatch):
+    """The volume guard goes live across the long tail once each protocol has five rows; it
+    must be scoped and folded like every other check, not emitted per protocol unmarked."""
+    rows = []
+    for protocol in ("tail-1", "tail-2"):
+        rows += [(protocol, f"2026-10-0{d}", 100.0) for d in range(1, 6)]
+        rows.append((protocol, "2026-10-06", 100_000.0))
+    rows += [("A", f"2026-10-0{d}", 100.0) for d in range(1, 6)] + [("A", "2026-10-06", 100_000.0)]
+    _publish(tmp_path, "protocol_revenue", _llama_frame(rows), ["protocol", "metric_date"])
+    report = run_validate(_validate_settings(tmp_path, monkeypatch, "defillama"), _UNIVERSE)
+
+    folded = [w for w in report.warnings if "volume_anomaly[total_fees_24h] [unmapped: " in w]
+    assert len(folded) == 1 and "tail-1, tail-2" in folded[0]
+    mapped = [w for w in report.warnings if "volume_anomaly[A:total_fees_24h]" in w]
+    assert len(mapped) == 1 and "[unmapped" not in mapped[0]
+    assert report.failures == []

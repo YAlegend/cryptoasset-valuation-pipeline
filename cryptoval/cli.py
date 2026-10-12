@@ -77,27 +77,42 @@ def _universe(assets: list[Asset]) -> dict[str, set[str]]:
     }
 
 
+def _named(ids: list[str]) -> str:
+    shown = ", ".join(ids[:_MAX_NAMED])
+    return shown + (f" +{len(ids) - _MAX_NAMED} more" if len(ids) > _MAX_NAMED else "")
+
+
+def _contract_and_identity_checks(frame: pd.DataFrame, contract: Contract) -> list:
+    return [
+        *run_checks(frame, contract, now=dt.datetime.now(dt.UTC)),
+        *run_identity_checks(frame),
+    ]
+
+
 def _unmapped_warnings(
     table: str, unscoped: pd.DataFrame, key: str, contract: Contract
 ) -> list[str]:
-    """One warning per failing check on out-of-universe entities, naming the entities."""
-    now = dt.datetime.now(dt.UTC)
-    failed = {r.name: r.detail for r in run_checks(unscoped, contract, now=now) if not r.passed}
+    """One warning per failing check on out-of-universe entities, naming the entities.
+
+    Covers the identity checks too: they are blocking for a configured id, so for an
+    unmapped one they must warn rather than vanish.
+    """
+    failed = {
+        r.name: r.detail
+        for r in _contract_and_identity_checks(unscoped, contract)
+        if not r.passed
+    }
     if not failed:
         return []
     culprits: dict[str, list[str]] = {name: [] for name in failed}
     for entity, group in unscoped.groupby(key):
-        for result in run_checks(group, contract, now=now):
+        for result in _contract_and_identity_checks(group, contract):
             if not result.passed and result.name in culprits:
                 culprits[result.name].append(str(entity))
-    out = []
-    for name, detail in failed.items():
-        ids = culprits[name]
-        shown = ", ".join(ids[:_MAX_NAMED])
-        if len(ids) > _MAX_NAMED:
-            shown += f" +{len(ids) - _MAX_NAMED} more"
-        out.append(f"{table}/{name} [unmapped: {shown or 'pooled'}]: {detail}")
-    return out
+    return [
+        f"{table}/{name} [unmapped: {_named(culprits[name]) or 'pooled'}]: {detail}"
+        for name, detail in failed.items()
+    ]
 
 
 def assert_unique_symbols(assets: list[Asset]) -> None:
@@ -204,8 +219,10 @@ def run_ingest(
 
 
 def _volume_anomaly_warnings(
-    name: str, table: str, df: pd.DataFrame, contract: Contract
+    name: str, table: str, df: pd.DataFrame, contract: Contract, *, unmapped: bool = False
 ) -> list[str]:
+    """Spike warnings per series. Out-of-universe series are folded into one warning per
+    watched column, naming the ids, so a long tail cannot flood the report."""
     spec = VOLUME_CHECKS.get(name)
     if spec is None or "metric_date" not in df.columns:
         return []
@@ -216,10 +233,20 @@ def _volume_anomaly_warnings(
     for value_col in value_cols:
         if value_col not in df.columns:
             continue
+        hits: list[tuple[str, str]] = []
         for entity, series in df.groupby(entity_col):
             result = check_volume_anomaly(series, contract, value_col, "metric_date")
             if not result.passed:
-                flagged.append(f"{table}/volume_anomaly[{entity}:{value_col}]: {result.detail}")
+                hits.append((str(entity), result.detail))
+        if unmapped and hits:
+            flagged.append(
+                f"{table}/volume_anomaly[{value_col}] "
+                f"[unmapped: {_named([e for e, _ in hits])}]: {hits[0][1]}"
+            )
+        elif not unmapped:
+            flagged.extend(
+                f"{table}/volume_anomaly[{e}:{value_col}]: {detail}" for e, detail in hits
+            )
     return flagged
 
 
@@ -274,7 +301,11 @@ def run_validate(settings: Settings, assets: list[Asset]) -> Validation:
         if not unscoped.empty:
             warnings.extend(_unmapped_warnings(table, unscoped, key, contract))
 
-        warnings.extend(_volume_anomaly_warnings(name, table, df, contract))
+        warnings.extend(_volume_anomaly_warnings(name, table, scoped, contract))
+        if not unscoped.empty:
+            warnings.extend(
+                _volume_anomaly_warnings(name, table, unscoped, contract, unmapped=True)
+            )
     return Validation(failures, warnings)
 
 
