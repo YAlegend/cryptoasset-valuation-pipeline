@@ -190,6 +190,16 @@ def _llama_frame(rows):
     )
 
 
+# The protocols the validate tests publish are all "mapped", so the gate treats them as in
+# scope; the scoping behaviour itself is pinned by the two tests that follow.
+_UNIVERSE = [
+    Asset(
+        symbol="UNI", sector="defi", consensus="other", cm_id="uni", gecko_id="uniswap",
+        defillama_slugs=("A", "B", "small", "huge"),
+    )
+]
+
+
 def _validate_settings(tmp_path, monkeypatch, only):
     """Restrict validation to one table so other empty tables don't add noise."""
     monkeypatch.setattr(cli, "SILVER_TABLE", {only: cli.SILVER_TABLE[only]})
@@ -201,7 +211,7 @@ def test_validate_flags_an_anomaly_in_one_protocol(tmp_path, monkeypatch):
     rows = [("A", f"2026-10-0{d}", 100.0) for d in range(1, 6)] + [("A", "2026-10-06", 1000.0)]
     rows += [("B", f"2026-10-0{d}", 100.0) for d in range(1, 7)]
     _publish(tmp_path, "protocol_revenue", _llama_frame(rows), ["protocol", "metric_date"])
-    report = run_validate(_validate_settings(tmp_path, monkeypatch, "defillama"))
+    report = run_validate(_validate_settings(tmp_path, monkeypatch, "defillama"), _UNIVERSE)
     anomalies = [w for w in report.warnings if "volume_anomaly" in w]
     assert len(anomalies) == 1
     assert anomalies[0].startswith("protocol_revenue/volume_anomaly[A:total_fees_24h]: ")
@@ -215,7 +225,7 @@ def test_volume_anomaly_is_computed_per_entity_not_across_the_frame(tmp_path, mo
     for d in range(1, 7):
         rows += [("small", f"2026-10-0{d}", 1.0), ("huge", f"2026-10-0{d}", 1_000_000.0)]
     _publish(tmp_path, "protocol_revenue", _llama_frame(rows), ["protocol", "metric_date"])
-    report = run_validate(_validate_settings(tmp_path, monkeypatch, "defillama"))
+    report = run_validate(_validate_settings(tmp_path, monkeypatch, "defillama"), _UNIVERSE)
     assert report.warnings == []
 
 
@@ -229,7 +239,7 @@ def test_validate_ignores_superseded_history_rows(tmp_path, monkeypatch):
                         dt.datetime(2026, 10, 11, tzinfo=dt.UTC))
     write_silver(r, "asset_metrics", second)
     settings = _validate_settings(tmp_path, monkeypatch, "coinmetrics")
-    assert [f for f in run_validate(settings).failures if "uniqueness" in f] == []
+    assert [f for f in run_validate(settings, _UNIVERSE).failures if "uniqueness" in f] == []
 
 
 def test_validate_names_table_check_and_detail_and_main_exits_nonzero(
@@ -238,18 +248,18 @@ def test_validate_names_table_check_and_detail_and_main_exits_nonzero(
     bad = _cm_frame(-5.0)  # violates the minimum: 0 range
     _publish(tmp_path, "asset_metrics", bad, ["asset", "metric_date"])
     settings = _validate_settings(tmp_path, monkeypatch, "coinmetrics")
-    failures = run_validate(settings).failures
+    failures = run_validate(settings, _UNIVERSE).failures
     ranges = [f for f in failures if f.startswith("asset_metrics/ranges: ")]
     assert len(ranges) == 1 and "CapMrktCurUSD < 0" in ranges[0]
 
-    monkeypatch.setattr(cli, "load_config", lambda: (settings, []))
+    monkeypatch.setattr(cli, "load_config", lambda: (settings, _UNIVERSE))
     assert main(["validate"]) == 1
     err = capsys.readouterr().err
     assert "FAIL asset_metrics/ranges: " in err
 
 
 def test_validate_reports_a_missing_table(tmp_path, monkeypatch):
-    report = run_validate(_validate_settings(tmp_path, monkeypatch, "coinmetrics"))
+    report = run_validate(_validate_settings(tmp_path, monkeypatch, "coinmetrics"), _UNIVERSE)
     assert report.failures == ["asset_metrics: no data ingested"]
 
 
@@ -289,7 +299,7 @@ def test_run_ingest_keeps_partial_rows_and_records_the_status_and_error(tmp_path
 def test_main_exits_nonzero_when_an_ingest_is_only_partial(tmp_path, monkeypatch):
     monkeypatch.setitem(SOURCES, "coingecko", _Partial())
     settings = Settings(data_root=str(tmp_path))
-    monkeypatch.setattr(cli, "load_config", lambda: (settings, []))
+    monkeypatch.setattr(cli, "load_config", lambda: (settings, _UNIVERSE))
     assert main(["ingest", "--sources", "coingecko"]) == 1
 
 
@@ -322,7 +332,7 @@ def _steady_then_spike(entity, value_col, spike=10_000.0):
 def test_validate_flags_an_anomalous_coin_metrics_reported_volume(tmp_path, monkeypatch):
     frame = _steady_then_spike("btc", "volume_reported_spot_usd_1d")
     _publish(tmp_path, "asset_metrics", frame, ["asset", "metric_date"])
-    report = run_validate(_validate_settings(tmp_path, monkeypatch, "coinmetrics"))
+    report = run_validate(_validate_settings(tmp_path, monkeypatch, "coinmetrics"), _UNIVERSE)
     assert [f for f in report.failures if "volume_anomaly" in f] == []
     anomalies = [w for w in report.warnings if "volume_anomaly" in w]
     assert len(anomalies) == 1
@@ -334,7 +344,7 @@ def test_validate_flags_an_anomalous_coin_metrics_reported_volume(tmp_path, monk
 def test_validate_flags_an_anomalous_coingecko_volume(tmp_path, monkeypatch):
     frame = _steady_then_spike("bitcoin", "volume_usd")
     _publish(tmp_path, "market_chart", frame, ["asset", "metric_date"])
-    report = run_validate(_validate_settings(tmp_path, monkeypatch, "coingecko"))
+    report = run_validate(_validate_settings(tmp_path, monkeypatch, "coingecko"), _UNIVERSE)
     anomalies = [w for w in report.warnings if "volume_anomaly" in w]
     assert len(anomalies) == 1
     assert anomalies[0].startswith("market_chart/volume_anomaly[bitcoin:volume_usd]: ")
@@ -353,7 +363,7 @@ def test_main_exits_zero_and_prints_warn_when_validation_only_warns(
         ["asset", "metric_date"],
     )
     settings = _validate_settings(tmp_path, monkeypatch, "coinmetrics")
-    monkeypatch.setattr(cli, "load_config", lambda: (settings, []))
+    monkeypatch.setattr(cli, "load_config", lambda: (settings, _UNIVERSE))
     assert main(["validate"]) == 0
     captured = capsys.readouterr()
     assert "WARN asset_metrics/volume_anomaly[btc:" in captured.err
@@ -363,7 +373,7 @@ def test_main_exits_zero_and_prints_warn_when_validation_only_warns(
 def test_an_impossible_volume_blocks_validation(tmp_path, monkeypatch):
     frame = _steady_then_spike("usdc", "volume_reported_spot_usd_1d", spike=6.99755e55)
     _publish(tmp_path, "asset_metrics", frame, ["asset", "metric_date"])
-    report = run_validate(_validate_settings(tmp_path, monkeypatch, "coinmetrics"))
+    report = run_validate(_validate_settings(tmp_path, monkeypatch, "coinmetrics"), _UNIVERSE)
     ranges = [f for f in report.failures if "ranges" in f]
     assert len(ranges) == 1
     assert "volume_reported_spot_usd_1d > 1" in ranges[0]
@@ -392,7 +402,7 @@ def test_reconcile_reports_the_errors_and_exits_nonzero(tmp_path, monkeypatch, c
     'no drift' over 1 of 24 assets is a false all-clear."""
     monkeypatch.setitem(SOURCES, "coingecko", _PartialReconcile())
     settings = Settings(data_root=str(tmp_path))
-    monkeypatch.setattr(cli, "load_config", lambda: (settings, []))
+    monkeypatch.setattr(cli, "load_config", lambda: (settings, _UNIVERSE))
     assert main(["reconcile", "--sources", "coingecko", "--start", "2026-10-01"]) == 1
     out = capsys.readouterr()
     assert "ethereum: 429" in out.err
@@ -402,7 +412,7 @@ def test_validate_fails_when_a_declared_column_is_wholly_null(tmp_path, monkeypa
     frame = _panel([("btc", "2026-10-09", 1.5)], "CapMVRVCur")
     frame["CapMVRVCur"] = None
     _publish(tmp_path, "asset_metrics", frame, ["asset", "metric_date"])
-    report = run_validate(_validate_settings(tmp_path, monkeypatch, "coinmetrics"))
+    report = run_validate(_validate_settings(tmp_path, monkeypatch, "coinmetrics"), _UNIVERSE)
     null_rate = [f for f in report.failures if "null_rate" in f]
     assert len(null_rate) == 1
     assert "CapMVRVCur" in null_rate[0]
@@ -475,7 +485,7 @@ def test_reconcile_does_not_report_a_quarantined_cell_as_a_revision(
 
     vendor = Vendor()
     monkeypatch.setitem(cli.SOURCES, "coinmetrics", vendor)
-    monkeypatch.setattr(cli, "load_config", lambda: (settings, []))
+    monkeypatch.setattr(cli, "load_config", lambda: (settings, _UNIVERSE))
     cli.run_ingest(settings, [], ["coinmetrics"], dt.date(2026, 5, 5), dt.date(2026, 5, 5))
 
     def reconcile_output():
@@ -490,3 +500,65 @@ def test_reconcile_does_not_report_a_quarantined_cell_as_a_revision(
     vendor.btc_cap = 1.7e12
     assert "'changed': 1" in reconcile_output()
     assert "'unchanged': 1" in reconcile_output()
+
+
+def test_an_unmapped_protocols_failure_warns_while_a_mapped_one_blocks(tmp_path):
+    """Spec 9.2: 2,991 protocols are ingested; a handful matter. The long tail must not
+    hold the build hostage, and a real defect in a valuation input must still stop it."""
+    settings = Settings(data_root=str(tmp_path))
+    uni = Asset(
+        symbol="UNI", sector="defi", consensus="other", cm_id="uni", gecko_id="uniswap",
+        defillama_slugs=("Uniswap V3",),
+    )
+
+    def _write(rows: list[dict]) -> None:
+        frame = pd.DataFrame(rows)
+        frame["effective_start_ts"] = pd.Timestamp("2026-10-11", tz="UTC")
+        frame["effective_end_ts"] = pd.NaT
+        frame["is_current"] = True
+        frame["row_hash"] = "h"
+        write_silver(settings.resolver, "protocol_revenue", frame)
+
+    # A negative GROSS fee is a vendor error the contract blocks -- but on a protocol we
+    # never value, so it is only a warning.
+    _write([
+        {"protocol": "Lombard LBTC", "metric_date": pd.Timestamp("2026-10-11", tz="UTC"),
+         "total_fees_24h": -23915.0, "total_fees_30d": 1581269.0, "net_revenue_24h": -1913.0},
+    ])
+    report = cli.run_validate(settings, [uni])
+    assert not [f for f in report.failures if "protocol_revenue/ranges" in f]
+    assert [w for w in report.warnings if "protocol_revenue/ranges" in w]
+
+    # The same defect on a MAPPED protocol blocks.
+    _write([
+        {"protocol": "Uniswap V3", "metric_date": pd.Timestamp("2026-10-11", tz="UTC"),
+         "total_fees_24h": -450744.0, "total_fees_30d": 1.2e7, "net_revenue_24h": 92267.0},
+    ])
+    report = cli.run_validate(settings, [uni])
+    assert [f for f in report.failures if "protocol_revenue/ranges" in f]
+
+
+def test_scoping_leaves_the_other_sources_blocking():
+    """Only DefiLlama has a long tail. An asset-metrics defect always blocks."""
+    assert cli.SCOPED_SOURCES == {"defillama"}
+
+
+def test_an_empty_mapping_warns_rather_than_silently_passing_every_protocol(
+    tmp_path, monkeypatch
+):
+    """With no defillama_slugs anywhere every protocol is unmapped; that is correct but
+    would hide a defect from an operator who forgot the mapping, so say so."""
+    rows = [("Lombard LBTC", f"2026-10-0{d}", 100.0) for d in range(1, 4)]
+    _publish(tmp_path, "protocol_revenue", _llama_frame(rows), ["protocol", "metric_date"])
+    bare = [Asset(symbol="BTC", cm_id="btc")]
+    report = run_validate(_validate_settings(tmp_path, monkeypatch, "defillama"), bare)
+    assert [w for w in report.warnings if "no defillama_slugs configured" in w]
+    assert report.failures == []
+
+
+def test_a_mapped_assets_other_sources_are_not_scoped(tmp_path, monkeypatch):
+    """Scoping must not reach asset_metrics: a negative cap blocks whatever the asset."""
+    _publish(tmp_path, "asset_metrics", _cm_frame(-5.0), ["asset", "metric_date"])
+    settings = _validate_settings(tmp_path, monkeypatch, "coinmetrics")
+    bare = [Asset(symbol="BTC", cm_id="btc")]
+    assert [f for f in run_validate(settings, bare).failures if "ranges" in f]

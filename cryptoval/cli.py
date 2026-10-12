@@ -53,6 +53,12 @@ VOLUME_CHECKS = {
     "coinmetrics": ("asset", ["volume_reported_spot_usd_1d"]),
 }
 
+# Only DefiLlama has a long tail: it serves 2,991 protocols of which a handful map to an
+# asset we value. A contract failure on an unmapped protocol is real but not ours to
+# block on, so it warns (spec 9.2). Every other source is entirely in scope.
+SCOPED_SOURCES = {"defillama"}
+SCOPE_KEY = {"defillama": "protocol"}
+
 
 def assert_unique_symbols(assets: list[Asset]) -> None:
     """Later tasks key on symbol; a duplicate silently halves one asset's coverage."""
@@ -192,9 +198,16 @@ class Validation:
     warnings: list[str]
 
 
-def run_validate(settings: Settings) -> Validation:
+def run_validate(settings: Settings, assets: list[Asset]) -> Validation:
     failures: list[str] = []
     warnings: list[str] = []
+    in_scope = {slug for a in assets for slug in a.defillama_slugs}
+    if not in_scope:
+        warnings.append(
+            "no defillama_slugs configured on any asset, so every protocol is unmapped "
+            "and its contract failures only warn"
+        )
+
     for name, table in SILVER_TABLE.items():
         history = _read_silver(settings, table)
         if history.empty:
@@ -203,12 +216,26 @@ def run_validate(settings: Settings) -> Validation:
         # Superseded vintages are kept by design; contracts apply to what is current.
         df = current_view(history)
         contract = load_contract(SOURCES[name].contract_path)
-        for result in run_checks(df, contract, now=dt.datetime.now(dt.UTC)):
+
+        scoped, unscoped = df, df.iloc[0:0]
+        if name in SCOPED_SOURCES:
+            key = SCOPE_KEY[name]
+            if key in df.columns:
+                mask = df[key].isin(in_scope)
+                scoped, unscoped = df[mask], df[~mask]
+
+        for result in run_checks(scoped, contract, now=dt.datetime.now(dt.UTC)):
             if not result.passed:
                 failures.append(f"{table}/{result.name}: {result.detail}")
-        for result in run_identity_checks(df):
+        for result in run_identity_checks(scoped):
             if not result.passed:
                 failures.append(f"{table}/{result.name}: {result.detail}")
+
+        if not unscoped.empty:
+            for result in run_checks(unscoped, contract, now=dt.datetime.now(dt.UTC)):
+                if not result.passed:
+                    warnings.append(f"{table}/{result.name} [unmapped]: {result.detail}")
+
         warnings.extend(_volume_anomaly_warnings(name, table, df, contract))
     return Validation(failures, warnings)
 
@@ -234,7 +261,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if args.command == "validate":
-        report = run_validate(settings)
+        report = run_validate(settings, assets)
         for w in report.warnings:
             print(f"WARN {w}", file=sys.stderr)
         for f in report.failures:
