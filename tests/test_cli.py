@@ -406,3 +406,41 @@ def test_validate_fails_when_a_declared_column_is_wholly_null(tmp_path, monkeypa
     null_rate = [f for f in report.failures if "null_rate" in f]
     assert len(null_rate) == 1
     assert "CapMVRVCur" in null_rate[0]
+
+
+def test_ingest_quarantines_an_impossible_value_before_it_reaches_silver(tmp_path, monkeypatch):
+    """The stored vintage must never contain a value the contract calls impossible."""
+    settings = Settings(data_root=str(tmp_path))
+
+    class ImpossibleVolumeSource:
+        name = "coinmetrics"
+        contract_path = "config/contracts/coinmetrics_asset_metrics.yml"
+
+        def fetch(self, start, end, assets, client):
+            return FetchResult(
+                pd.DataFrame(
+                    {
+                        "asset": ["usdc"],
+                        "metric_date": pd.to_datetime(["2026-05-05"], utc=True),
+                        "volume_reported_spot_usd_1d": [8.02e52],
+                        "CapMrktCurUSD": [7.52e10],
+                    }
+                ),
+                1,
+            )
+
+    monkeypatch.setitem(cli.SOURCES, "coinmetrics", ImpossibleVolumeSource())
+    cli.run_ingest(settings, [], ["coinmetrics"], dt.date(2026, 5, 5), dt.date(2026, 5, 5))
+
+    silver = pd.read_parquet(
+        pathlib.Path(settings.resolver.table("silver", "asset_metrics")) / "part-0.parquet"
+    )
+    assert silver["volume_reported_spot_usd_1d"].isna().all()
+    # The healthy market cap in the same row survived.
+    assert silver["CapMrktCurUSD"].iloc[0] == 7.52e10
+
+    quarantine = pd.read_parquet(
+        pathlib.Path(settings.resolver.table("silver", "quarantine")) / "part-0.parquet"
+    )
+    assert quarantine["raw_value"].iloc[0] == 8.02e52
+    assert quarantine["column"].iloc[0] == "volume_reported_spot_usd_1d"

@@ -17,6 +17,7 @@ from cryptoval.contracts.identities import run_identity_checks
 from cryptoval.contracts.loader import Contract, load_contract
 from cryptoval.io.bronze import write_bronze, write_silver
 from cryptoval.manifest import RunManifest
+from cryptoval.quarantine import QUARANTINE_COLUMNS, quarantine_impossible
 from cryptoval.scd2 import current_view, merge_scd2, reconcile_report
 from cryptoval.sources.coinmetrics import CoinMetricsSource
 from cryptoval.sources.defillama import DefiLlamaSource
@@ -69,6 +70,18 @@ def _read_silver(settings: Settings, table: str) -> pd.DataFrame:
     return pd.read_parquet(path) if path.exists() else pd.DataFrame()
 
 
+def _append_quarantine(settings: Settings, rows: pd.DataFrame) -> None:
+    """Quarantine is an append-only log, not an SCD2 table: every entry is a fact about
+    one run, and row growth is itself the monitored signal (spec 9.1)."""
+    existing = _read_silver(settings, "quarantine")
+    combined = (
+        pd.concat([existing, rows], ignore_index=True)
+        if not existing.empty
+        else rows.reindex(columns=QUARANTINE_COLUMNS)
+    )
+    write_silver(settings.resolver, "quarantine", combined)
+
+
 def _value_cols(frame: pd.DataFrame, key: list[str]) -> list[str]:
     return [c for c in frame.columns if c not in key and not c.startswith("_")]
 
@@ -99,11 +112,23 @@ def run_ingest(
                 write_bronze(settings.resolver, name, end, result.frame, params)
 
                 table, key = SILVER_TABLE[name], KEYS[name]
+                # After bronze (which keeps what the vendor sent) and before the merge (so the
+                # stored vintage is clean): an impossible cell is nulled and logged, not carried.
+                frame, quarantined = quarantine_impossible(
+                    result.frame,
+                    load_contract(source.contract_path),
+                    name,
+                    record.run_id,
+                    key,
+                )
+                if not quarantined.empty:
+                    _append_quarantine(settings, quarantined)
+
                 merged = merge_scd2(
                     _read_silver(settings, table),
-                    result.frame,
+                    frame,
                     key,
-                    _value_cols(result.frame, key),
+                    _value_cols(frame, key),
                     as_of,
                 )
                 write_silver(settings.resolver, table, merged)
