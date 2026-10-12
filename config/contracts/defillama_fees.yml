@@ -31,7 +31,7 @@ quality:
     # calendar day of operation. It must match the SCD2 key.
     combination: [protocol, metric_date]
   volume:
-    anomaly_threshold: 0.5
+    anomaly_threshold: 5.0       # |x - trailing mean| / trailing mean = +500%: a spike detector, not volatility (spec 9.2)
   notes: |
     methodology_hash fingerprints DefiLlama's own per-protocol methodology
     text. A change to it means the revenue series has been redefined and the

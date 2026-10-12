@@ -23,4 +23,4 @@ quality:
   uniqueness:
     combination: [asset, metric_date]
   volume:
-    anomaly_threshold: 0.5       # +/-50% vs trailing average (spec section 9.2)
+    anomaly_threshold: 5.0       # |x - trailing mean| / trailing mean = +500%: a spike detector, not volatility (spec 9.2)

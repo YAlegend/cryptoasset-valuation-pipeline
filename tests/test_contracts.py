@@ -38,7 +38,7 @@ def test_loads_contract_metadata():
     assert c.version == "1.0.0"
     assert c.unique_on == ["asset", "metric_date"]
     assert c.freshness_max_delay_hours == 48
-    assert c.volume_anomaly_threshold == 0.5
+    assert c.volume_anomaly_threshold == 5.0
     assert c.required_columns == ["asset", "metric_date"]
 
 
@@ -107,6 +107,47 @@ def test_volume_anomaly_allows_normal_variation():
         }
     )
     assert check_volume_anomaly(steady, c, "value", "metric_date").passed
+
+
+def _long_series(n_days, latest, history=100.0):
+    return pd.DataFrame(
+        {
+            "metric_date": pd.date_range("2026-01-01", periods=n_days, tz="UTC"),
+            "value": [history] * (n_days - 1) + [latest],
+        }
+    )
+
+
+def test_volume_anomaly_judges_only_the_newest_observation():
+    """A years-old event must not be re-reported on every validate: a +100x day early in a
+    long history is not a signal about today's data."""
+    c = load_contract(CONTRACT)
+    df = _long_series(400, latest=100.0)
+    df.loc[50, "value"] = 10_000.0  # a fork-day-scale spike, long ago
+    assert check_volume_anomaly(df, c, "value", "metric_date").passed
+
+
+def test_volume_anomaly_ignores_a_routine_move_but_flags_a_fork_day_spike():
+    """The documented events are +246x (BCH), +102x (DOGE), +89x (MANA); a 62% day-on-day
+    move (BTC's measured latest) is ordinary. Both halves, so the fix is not mere silence."""
+    c = load_contract(CONTRACT)
+    routine = _long_series(60, latest=38.0)  # a 62% fall, like BTC on 2026-10-11
+    assert check_volume_anomaly(routine, c, "value", "metric_date").passed
+    assert check_volume_anomaly(_long_series(60, latest=160.0), c, "value", "metric_date").passed
+
+    spike = _long_series(60, latest=100.0 * 101)  # +100x
+    res = check_volume_anomaly(spike, c, "value", "metric_date")
+    assert not res.passed
+    assert "value=10100" in res.detail and "2026-03-01" in res.detail
+
+
+def test_volume_anomaly_is_independent_of_stored_row_order():
+    c = load_contract(CONTRACT)
+    spike = _long_series(60, latest=100.0 * 101)
+    reversed_spike = spike.iloc[::-1]  # stored newest-first, as silver need not be sorted
+    assert not check_volume_anomaly(reversed_spike, c, "value", "metric_date").passed
+    reversed_calm = _long_series(60, latest=38.0).iloc[::-1]
+    assert check_volume_anomaly(reversed_calm, c, "value", "metric_date").passed
 
 
 def test_run_checks_aggregates_all_results():
@@ -209,7 +250,7 @@ DEFILLAMA_CONTRACT = "config/contracts/defillama_fees.yml"
 
 def test_coingecko_contract_carries_a_volume_anomaly_threshold():
     """Ruling C: the wired guard checks nothing without a threshold."""
-    assert load_contract(COINGECKO_CONTRACT).volume_anomaly_threshold == 0.5
+    assert load_contract(COINGECKO_CONTRACT).volume_anomaly_threshold == 5.0
 
 
 def test_market_cap_is_not_required_because_coin_metrics_omits_it():

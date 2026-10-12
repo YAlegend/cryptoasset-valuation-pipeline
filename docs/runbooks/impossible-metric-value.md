@@ -47,3 +47,29 @@ daily panel) and they are non-blocking by design:
 Bitcoin Cash's fork day (+246x), DOGE in July 2020 (+102x) and MANA in late
 2021 (+89x) are genuine market events whose ratios are indistinguishable from
 corruption. The ratio warns, the absolute bound blocks.
+
+## What the volume-anomaly warning now means (2026-10-12)
+
+The warning judges **only the newest observation** of each series against the mean of the
+previous 30, and fires at `anomaly_threshold: 5.0`, meaning a deviation above +500%
+(`|x - trailing| / trailing`). Both changes were forced by live data, not taste:
+
+- The check used to scan the whole history and report the single worst day. On the 11-year
+  Bitcoin series 946 of 4,299 days exceeded the old `0.5`, so it fired on 24 of 24 Coin Metrics
+  ids and 24 of 24 CoinGecko ids on every run, re-reporting a 2015 event forever.
+- `0.5` is +50%, two to three orders of magnitude below the events this check exists to flag
+  (BCH +246x, DOGE +102x, MANA +89x). Latest-observation counts at each candidate
+  (asset_metrics 25 ids, market_chart 24 ids): `0.5` -> 13 and 8 warnings; `5.0` -> 0 and 0;
+  `10.0` -> 0 and 0. `5.0` is the lowest candidate that leaves normal operation quiet while
+  still catching every documented event with a wide margin.
+
+**The narrowing is deliberate, not an oversight.** An anomaly in the *middle* of a multi-day
+ingest is no longer flagged by this check. That is acceptable because the check is
+non-blocking, the contract's absolute range maximum still blocks, and the quarantine step
+(`cryptoval/quarantine.py`) now nulls and logs genuinely impossible values regardless of this
+warning. The hard protection no longer rests here.
+
+**Known gap: this is a spike-only detector.** The deviation is `|x - trailing| / trailing`, so
+a collapse cannot exceed 1.0: a vendor silently returning near-zero volume scores about 1.0,
+which warned at `0.5` and does not at `5.0`. On the live panel `trx_eth` (a near-dead
+wrapper) scores exactly 1.0 on its latest day. A separate collapse signal is not built here.

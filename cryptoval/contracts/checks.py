@@ -113,16 +113,20 @@ def check_volume_anomaly(
     # trailing means of zero would give an infinite deviation; treat them as unknown.
     safe_trailing = trailing.where(trailing != 0)
     deviation = (values - safe_trailing).abs() / safe_trailing
-    worst = deviation.max()
-    if pd.isna(worst):
+    # Only the newest observation is judged: this runs on every validate, so scanning the
+    # whole history would re-report a years-old event forever (see
+    # docs/runbooks/impossible-metric-value.md for why that narrowing is safe).
+    latest = deviation.iloc[-1]
+    if pd.isna(latest):
         return CheckResult("volume_anomaly", True, "no valid trailing baseline")
-    if worst <= threshold:
+    if latest <= threshold:
         return CheckResult("volume_anomaly", True, "")
-    idx = deviation.idxmax()
     return CheckResult(
         "volume_anomaly",
         False,
-        f"anomalous {value_col}={values.loc[idx]:.0f} deviates {worst:.1%} from trailing mean",
+        f"anomalous {value_col}={values.iloc[-1]:.0f} on "
+        f"{pd.Timestamp(ordered[date_col].iloc[-1]).date()} deviates {latest:.1%} "
+        "from trailing mean",
     )
 
 
