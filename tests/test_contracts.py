@@ -377,3 +377,38 @@ def test_defillama_uniqueness_is_keyed_by_protocol_and_date():
         }
     )
     assert check_unique(two_days, c).passed
+
+
+def test_negative_net_revenue_is_legitimate_but_negative_gross_fees_are_not():
+    """Spec 9.2: a protocol can pay out more than it takes in; it cannot collect negative fees.
+
+    Measured on the live feed 2026-10-12: Ensuro (insurance, claims above premiums),
+    Hegic (options, writers lost) and Fragment ($1.05M fees, -$852K net revenue from
+    rebates) all report negative net revenue as a true description of their day.
+    """
+    contract = load_contract("config/contracts/defillama_fees.yml")
+
+    legitimate = pd.DataFrame(
+        {
+            "protocol": ["Ensuro", "Fragment"],
+            "metric_date": pd.to_datetime(["2026-10-11", "2026-10-11"], utc=True),
+            "total_fees_24h": [0.0, 1053729.0],
+            "total_fees_30d": [113662.0, 32315485.0],
+            "net_revenue_24h": [-1281.0, -852147.0],
+        }
+    )
+    assert check_ranges(legitimate, contract).passed
+
+    vendor_error = legitimate.copy()
+    vendor_error.loc[0, "total_fees_24h"] = -23915.0
+    result = check_ranges(vendor_error, contract)
+    assert not result.passed
+    assert "total_fees_24h" in result.detail
+
+
+def test_net_revenue_has_no_lower_bound_in_the_contract():
+    contract = load_contract("config/contracts/defillama_fees.yml")
+    assert "minimum" not in contract.ranges.get("net_revenue_24h", {})
+    # Gross columns keep theirs.
+    assert contract.ranges["total_fees_24h"]["minimum"] == 0
+    assert contract.ranges["total_fees_30d"]["minimum"] == 0
