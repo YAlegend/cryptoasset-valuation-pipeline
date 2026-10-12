@@ -2,7 +2,18 @@ version: 2
 
 models:
   - name: fct_asset_metrics_daily
-    description: Conformed daily asset panel with derived cost-approach metrics.
+    description: >
+      Conformed daily asset panel at grain (symbol, metric_date): Coin Metrics network and
+      valuation metrics joined to CoinGecko's panel, with derived cost-approach metrics.
+      Two columns are resolved across vendors and one deliberately is not. price_usd is
+      coalesced (Coin Metrics, else CoinGecko) because it is the same quantity measured by
+      two vendors to within a fraction of a percent. Market cap is resolved too, with
+      market_cap_source recording the vendor. Volume is NEVER coalesced:
+      volume_reported_spot_usd (Coin Metrics) and volume_total_usd (CoinGecko) are different
+      constructions over different exchange sets, about 5x apart on BTC, so each has its own
+      velocity and a method must name which one it used. panel_vintage_ts stamps the silver
+      panel state the row was built from; effective_end_ts is intentionally not carried,
+      since on a current-state row it is always the open sentinel.
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -14,8 +25,9 @@ models:
         tests: [not_null]
       - name: market_cap_usd
         description: >
-          NULL where Coin Metrics publishes no market cap for the asset-day (6,623 rows
-          on 2026-10-11, e.g. BNB and DOT). The not_null test is therefore a WARNING,
+          Resolved across vendors; market_cap_source says which. NULL where Coin Metrics
+          publishes no market cap and the asset is not routed to CoinGecko (6,890 rows
+          on 2026-10-12, mostly BNB, DOT and MKR). The not_null test is therefore a WARNING,
           not an error: a genuine market-cap outage shows up as a rising warn count,
           while the blocking tripwires are the range bound and the identity checks.
         tests:
@@ -25,13 +37,46 @@ models:
           - dbt_utils.accepted_range:
               arguments:
                 min_value: 0
+      - name: market_cap_source
+        description: >
+          Which vendor supplied market_cap_usd: 'coinmetrics', or 'coingecko' where the free
+          Coin Metrics tier serves none (TRX). NULL exactly when market_cap_usd is NULL.
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['coinmetrics', 'coingecko']
+              config:
+                where: "market_cap_source is not null"
+      - name: price_usd
+        description: >
+          Coin Metrics' price, else CoinGecko's. Coalesced, unlike volume, because both
+          vendors measure the same quantity to within a fraction of a percent.
+      - name: volume_total_usd
+        description: >
+          CoinGecko's TOTAL volume. A different construction from volume_reported_spot_usd,
+          never coalesced with it.
+      - name: velocity_reported
+        description: >
+          volume_reported_spot_usd / market_cap_usd. NULL when either is NULL or the market
+          cap is not positive.
+      - name: velocity_total
+        description: >
+          volume_total_usd / market_cap_usd. NULL when either is NULL or the market cap is
+          not positive.
+      - name: panel_vintage_ts
+        description: >
+          The latest effective_start_ts among the contributing metric groups (network,
+          valuation, volume) of the silver panel: the state this row was built from. A
+          quarantined cell changes velocity and so every Family A and D estimate, so two
+          estimates that differ are comparable only when their vintages are.
       - name: mvrv
         tests:
           - dbt_utils.accepted_range:
               arguments:
                 min_value: 0
+                inclusive: false
               config:
-                severity: warn
+                where: "mvrv is not null"
       - name: thermocap_usd
         description: >
           WINDOWED thermocap, not true thermocap: the cumulative sum of daily miner
@@ -61,6 +106,39 @@ models:
           LOWER bound, so mvtv (market cap / thermocap) and investor_cap_usd
           (realized_cap - thermocap) are both biased UPWARD and must not be read as
           exact.
+        tests: [not_null]
+
+  - name: fct_protocol_revenue_daily
+    description: >
+      Protocol revenue at the valuation grain (symbol, metric_date); only assets mapped to a
+      DefiLlama slug appear. revenue_regime separates a zero net revenue against non-zero
+      fees (the fee switch is off: a finding) from an unknown one (a gap).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [symbol, metric_date]
+    columns:
+      - name: revenue_regime
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['unknown', 'fees_fully_distributed', 'net_outflow', 'retains_revenue']
+
+  - name: fct_equity_prices_daily
+    description: >
+      Equity and macro closes at grain (symbol, metric_date). Separate from the crypto fact
+      because the trading calendar differs: a shared spine would manufacture nulls on every
+      weekend and holiday.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [symbol, metric_date]
+    columns:
+      - name: symbol
+        tests: [not_null]
+      - name: metric_date
+        tests: [not_null]
+      - name: price_usd
         tests: [not_null]
 
   - name: dim_date

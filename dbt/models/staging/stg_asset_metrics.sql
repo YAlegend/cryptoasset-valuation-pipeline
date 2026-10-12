@@ -42,12 +42,14 @@ network as (
     join sources s on p.vendor_id = s.source_id and s.metric_group = 'network'
 ),
 valuation as (
-    select s.symbol, p.metric_date, p.market_cap_usd, p.mvrv, p.realized_cap, p.price_usd
+    select s.symbol, p.metric_date, p.market_cap_usd, p.mvrv, p.realized_cap, p.price_usd,
+           p.effective_start_ts, p.row_hash
     from panel p
     join sources s on p.vendor_id = s.source_id and s.metric_group = 'valuation'
 ),
 volume as (
-    select s.symbol, p.metric_date, p.volume_reported_spot_usd
+    select s.symbol, p.metric_date, p.volume_reported_spot_usd,
+           p.effective_start_ts, p.row_hash
     from panel p
     join sources s on p.vendor_id = s.source_id and s.metric_group = 'volume'
 ),
@@ -72,8 +74,24 @@ select
     n.active_addresses,
     n.tx_count,
     vol.volume_reported_spot_usd,
-    n.effective_start_ts,
-    n.row_hash
+    -- Provenance is derived across every contributing group, not from `network` alone: a
+    -- symbol-day present only through the volume group (cm:avax outside cm:avaxc's range)
+    -- has no network row, and a NULL vintage there would leave the estimate untraceable.
+    -- The row's content was last established at the latest contributing vintage, so that
+    -- is the vintage; greatest() skips NULLs from groups that did not contribute. row_hash
+    -- is the hash of the group that supplied that vintage; a tie goes to network, then
+    -- valuation, then volume.
+    greatest(n.effective_start_ts, v.effective_start_ts, vol.effective_start_ts)
+                                                  as effective_start_ts,
+    case
+        when n.effective_start_ts is not null
+         and n.effective_start_ts = greatest(n.effective_start_ts, v.effective_start_ts,
+                                             vol.effective_start_ts) then n.row_hash
+        when v.effective_start_ts is not null
+         and v.effective_start_ts = greatest(v.effective_start_ts, vol.effective_start_ts)
+            then v.row_hash
+        else vol.row_hash
+    end                                           as row_hash
 from spine sp
 left join network   n   on sp.symbol = n.symbol   and sp.metric_date = n.metric_date
 left join valuation v   on sp.symbol = v.symbol   and sp.metric_date = v.metric_date

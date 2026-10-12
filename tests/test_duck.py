@@ -105,43 +105,67 @@ def test_connect_rejects_remote_root_without_side_effects(tmp_path, monkeypatch,
     assert list(tmp_path.iterdir()) == []
 
 
-def test_staging_resolves_vendor_ids_to_symbols():
-    """Run stg_asset_metrics.sql itself: AVAX's two vendor series become one row per day.
+_PANEL_METRIC_COLUMNS = (
+    "CapMVRVCur", "realized_cap", "PriceUSD", "SplyCur", "HashRate", "IssTotUSD",
+    "FeeTotNtv", "TxCnt",
+)
 
-    The model's own SQL text is executed with its dbt references swapped for fixture
-    relations, so this fails if the model changes shape -- a hand-written copy of the
-    join would drift from it.
+
+def _model_sql(name: str, layer: str) -> str:
+    """A dbt model's own SQL text, with its reads swapped for fixture relations.
+
+    The model is executed, not paraphrased: a hand-written copy of a join would drift
+    from the model it claims to test.
     """
-    import datetime
     import re
+
+    model = pathlib.Path(__file__).parent.parent / f"dbt/models/{layer}/{name}.sql"
+    sql = model.read_text(encoding="utf-8")
+    for source in ("asset_metrics", "market_chart"):
+        sql = sql.replace(
+            f"""read_parquet('{{{{ var("data_root") }}}}/silver/{source}/*.parquet')""",
+            f"silver_{source}",
+        )
+    sql = re.sub(r"\{\{\s*ref\('(\w+)'\)\s*\}\}", r"\1", sql)
+    assert "{{" not in sql, f"unsubstituted dbt reference in {name}.sql"
+    return sql
+
+
+def _silver_panel(con, rows: str) -> None:
+    """Create the silver_asset_metrics fixture; columns the model needs but a test does not
+    care about are added as nulls."""
+    con.execute(
+        f"""
+        create table silver_asset_metrics as select * from (values {rows})
+        as t(asset, metric_date, "CapMrktCurUSD", "AdrActCnt", "volume_reported_spot_usd_1d",
+             effective_start_ts, row_hash, is_current)
+        """
+    )
+    for col in _PANEL_METRIC_COLUMNS:
+        con.execute(f'alter table silver_asset_metrics add column "{col}" double')
+    con.execute("alter table silver_asset_metrics add column effective_end_ts timestamptz")
+
+
+def test_staging_resolves_vendor_ids_to_symbols():
+    """Run stg_asset_metrics.sql itself: AVAX's two vendor series become one row per day."""
+    import datetime
 
     import duckdb
 
-    model = pathlib.Path(__file__).parent.parent / "dbt/models/staging/stg_asset_metrics.sql"
-    sql = model.read_text(encoding="utf-8")
-    panel_read = """read_parquet('{{ var("data_root") }}/silver/asset_metrics/*.parquet')"""
-    sql = sql.replace(panel_read, "silver_panel")
-    sql = re.sub(r"\{\{\s*ref\('(\w+)'\)\s*\}\}", r"\1", sql)
-    assert "{{" not in sql, "unsubstituted dbt reference in stg_asset_metrics.sql"
-
+    sql = _model_sql("stg_asset_metrics", "staging")
     con = duckdb.connect()
-    con.execute(
+    _silver_panel(
+        con,
         """
-        create table silver_panel as select * from (values
-            ('avaxc', timestamptz '2026-10-01 00:00:00+00', 1.0e9, 100.0, null, true),
-            ('avax',  timestamptz '2026-10-01 00:00:00+00', null,  null,  5.0e7, true),
-            -- avax serves a day that avaxc does not: a volume-only day.
-            ('avax',  timestamptz '2026-10-02 00:00:00+00', null,  null,  6.0e7, true)
-        ) as t(asset, metric_date, "CapMrktCurUSD", "AdrActCnt", "volume_reported_spot_usd_1d",
-               is_current)
-        """
+        ('avaxc', timestamptz '2026-10-01 00:00:00+00', 1.0e9, 100.0, null,
+         timestamptz '2026-10-02 00:00:00+00', 'h1', true),
+        ('avax',  timestamptz '2026-10-01 00:00:00+00', null,  null,  5.0e7,
+         timestamptz '2026-10-02 00:00:00+00', 'h2', true),
+        -- avax serves a day that avaxc does not: a volume-only day.
+        ('avax',  timestamptz '2026-10-02 00:00:00+00', null,  null,  6.0e7,
+         timestamptz '2026-10-03 00:00:00+00', 'h3', true)
+        """,
     )
-    # The model selects more columns than the fixture needs; give the rest as nulls.
-    for col in ("CapMVRVCur", "realized_cap", "PriceUSD", "SplyCur", "HashRate", "IssTotUSD",
-                "FeeTotNtv", "TxCnt", "row_hash"):
-        con.execute(f'alter table silver_panel add column "{col}" double')
-    con.execute("alter table silver_panel add column effective_start_ts timestamptz")
-    con.execute("alter table silver_panel add column effective_end_ts timestamptz")
     con.execute(
         """
         create table asset_metric_sources as select * from (values
@@ -160,3 +184,161 @@ def test_staging_resolves_vendor_ids_to_symbols():
         ("AVAX", datetime.date(2026, 10, 1), 100.0, 1.0e9, 5.0e7),
         ("AVAX", datetime.date(2026, 10, 2), None, None, 6.0e7),
     ]
+
+
+def test_a_volume_only_symbol_day_still_carries_a_panel_vintage():
+    """panel_vintage_ts is the latest vintage among the contributing metric groups.
+
+    A day that exists solely through the volume group (cm:avax outside cm:avaxc's range) has
+    no network row; deriving the vintage from `network` alone would leave it NULL, and the
+    estimate built on it untraceable.
+    """
+    import datetime
+
+    import duckdb
+
+    sql = _model_sql("stg_asset_metrics", "staging")
+    con = duckdb.connect()
+    _silver_panel(
+        con,
+        """
+        -- Day 1: network/valuation vintage Oct 2, volume vintage Oct 5 (a later restatement).
+        ('avaxc', timestamptz '2026-10-01 00:00:00+00', 1.0e9, 100.0, null,
+         timestamptz '2026-10-02 00:00:00+00', 'net1', true),
+        ('avax',  timestamptz '2026-10-01 00:00:00+00', null,  null,  5.0e7,
+         timestamptz '2026-10-05 00:00:00+00', 'vol1', true),
+        -- Day 2: volume only.
+        ('avax',  timestamptz '2026-10-02 00:00:00+00', null,  null,  6.0e7,
+         timestamptz '2026-10-03 00:00:00+00', 'vol2', true),
+        -- Day 3: network only; the volume group contributes nothing.
+        ('avaxc', timestamptz '2026-10-03 00:00:00+00', 1.1e9, 110.0, null,
+         timestamptz '2026-10-04 00:00:00+00', 'net3', true)
+        """,
+    )
+    con.execute(
+        """
+        create table asset_metric_sources as select * from (values
+            ('AVAX','network','cm','avaxc'), ('AVAX','valuation','cm','avaxc'),
+            ('AVAX','volume','cm','avax')
+        ) as t(symbol, metric_group, source_kind, source_id)
+        """
+    )
+    out = con.execute(
+        f"select metric_date, effective_start_ts at time zone 'UTC', row_hash "
+        f"from ({sql}) order by metric_date"
+    ).fetchall()
+    d = datetime.datetime
+    assert out == [
+        # The latest contributing vintage wins, and the hash is that group's hash.
+        (datetime.date(2026, 10, 1), d(2026, 10, 5), "vol1"),
+        (datetime.date(2026, 10, 2), d(2026, 10, 3), "vol2"),
+        (datetime.date(2026, 10, 3), d(2026, 10, 4), "net3"),
+    ]
+
+
+def test_the_two_volume_series_are_both_carried_and_never_coalesced():
+    """Spec 10.1: they differ 5x on BTC, so a method must choose explicitly."""
+    import duckdb
+
+    con = duckdb.connect()
+    con.execute(
+        """
+        create table fct as select * from (values
+            ('BTC', date '2026-10-10', 1.666e12, 'coinmetrics', 2.97e9, 1.48e10),
+            ('TRX', date '2026-10-10', 3.14e10,  'coingecko',   5.84e7, 2.54e8)
+        ) as t(symbol, metric_date, market_cap_usd, market_cap_source,
+               volume_reported_spot_usd, volume_total_usd)
+        """
+    )
+    rows = con.execute(
+        """
+        select symbol, market_cap_source,
+               volume_total_usd / nullif(volume_reported_spot_usd, 0) as ratio
+        from fct order by symbol
+        """
+    ).fetchall()
+    btc = rows[0]
+    # If a model ever coalesced them the ratio would be exactly 1.0 and the 5x gap would
+    # vanish without anyone noticing.
+    assert btc[2] > 4.0
+    # TRX's market cap can only come from CoinGecko; the row says so rather than implying
+    # a Coin Metrics figure.
+    assert rows[1][1] == "coingecko"
+
+
+def test_fct_asset_metrics_daily_sql_keeps_volumes_apart_and_records_the_market_cap_source():
+    """Run fct_asset_metrics_daily.sql itself against fixture staging relations."""
+    import duckdb
+
+    sql = _model_sql("fct_asset_metrics_daily", "marts")
+    con = duckdb.connect()
+    con.execute(
+        """
+        create table stg_asset_metrics as select * from (values
+            -- BTC: Coin Metrics serves market cap and volume; CoinGecko serves its own volume.
+            ('BTC', date '2026-10-10', 1.0e12, 2.0e11, 100.0, 1.0e3, 2.0e7, null, null,
+             null, null, 5.0e9, timestamptz '2026-10-11 00:00:00+00'),
+            -- BTC: a zero market cap must give a NULL velocity, never infinity.
+            ('BTC', date '2026-10-11', 0.0, 2.0e11, 100.0, 1.0e3, 2.0e7, null, null,
+             null, null, 5.0e9, timestamptz '2026-10-11 00:00:00+00'),
+            -- BTC: Coin Metrics has no volume that day; CoinGecko's must not stand in for it.
+            ('BTC', date '2026-10-12', 1.0e12, 2.0e11, 100.0, 1.0e3, 2.0e7, null, null,
+             null, null, null, timestamptz '2026-10-11 00:00:00+00'),
+            -- TRX: no Coin Metrics market cap at all.
+            ('TRX', date '2026-10-10', null, null, null, null, null, null, null,
+             null, null, 5.0e7, timestamptz '2026-10-11 00:00:00+00'),
+            ('TRX', date '2026-10-11', null, null, null, null, null, null, null,
+             null, null, 5.0e7, timestamptz '2026-10-11 00:00:00+00')
+        ) as t(symbol, metric_date, market_cap_usd, realized_cap, price_usd, supply, hash_rate,
+               issuance_usd, fees_native, active_addresses, tx_count,
+               volume_reported_spot_usd, effective_start_ts)
+        """
+    )
+    con.execute("alter table stg_asset_metrics add column mvrv double")
+    con.execute("alter table stg_asset_metrics add column row_hash varchar")
+    con.execute(
+        """
+        create table stg_market_chart as select * from (values
+            ('BTC', date '2026-10-10', 100.5, 9.0e11, 1.5e10),
+            ('BTC', date '2026-10-11', 100.5, 9.0e11, 1.5e10),
+            ('BTC', date '2026-10-12', 100.5, 9.0e11, 1.5e10),
+            ('TRX', date '2026-10-10', 0.3, 3.0e10, 2.5e8),
+            -- TRX, second day: CoinGecko has no market cap either.
+            ('TRX', date '2026-10-11', 0.3, null, 2.5e8)
+        ) as t(symbol, metric_date, cg_price_usd, cg_market_cap_usd, cg_volume_total_usd)
+        """
+    )
+    con.execute(
+        """
+        create table asset_metric_sources as select * from (values
+            ('BTC','valuation','cm','btc'), ('TRX','valuation','coingecko','tron')
+        ) as t(symbol, metric_group, source_kind, source_id)
+        """
+    )
+    cols = [c[0] for c in con.execute(f"describe select * from ({sql})").fetchall()]
+    assert "panel_vintage_ts" in cols and "effective_end_ts" not in cols
+
+    rows = {
+        (r[0], str(r[1])): r[2:]
+        for r in con.execute(
+            f"""
+            select symbol, metric_date, market_cap_usd, market_cap_source,
+                   volume_reported_spot_usd, volume_total_usd,
+                   velocity_reported, velocity_total, panel_vintage_ts is not null
+            from ({sql})
+            """
+        ).fetchall()
+    }
+    # Both volumes side by side, each with its own velocity over the same market cap.
+    assert rows[("BTC", "2026-10-10")] == (
+        1.0e12, "coinmetrics", 5.0e9, 1.5e10, 5.0e-3, 1.5e-2, True
+    )
+    # A zero market cap leaves both velocities NULL.
+    assert rows[("BTC", "2026-10-11")][4:6] == (None, None)
+    # Coin Metrics' missing volume stays missing; CoinGecko's is not substituted for it.
+    assert rows[("BTC", "2026-10-12")][2:6] == (None, 1.5e10, None, 1.5e-2)
+    # TRX's market cap is CoinGecko's, and the row says so.
+    assert rows[("TRX", "2026-10-10")][:2] == (3.0e10, "coingecko")
+    # Where CoinGecko has none either, the source is NULL too, and so are the velocities.
+    assert rows[("TRX", "2026-10-11")][:2] == (None, None)
+    assert rows[("TRX", "2026-10-11")][4:6] == (None, None)
