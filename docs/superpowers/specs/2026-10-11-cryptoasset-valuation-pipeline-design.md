@@ -2,10 +2,28 @@
 
 | | |
 |---|---|
-| **Date** | 2026-10-11 |
-| **Status** | Draft for review |
+| **Date** | 2026-10-11, revised 2026-10-12 |
+| **Status** | Phase 0-1 implemented and merged; Phase 2 planned |
 | **Author** | Yasir Arafat (with Claude Code) |
 | **Source material** | `Cryptoassets-Valuation-Dissertation-Yasir-Arafat.pdf` — MSc FinTech, University of Liverpool, Dec 2022 |
+
+### Revision log
+
+**2026-10-12 — revised against the live panel Plan 1 produced.** Building the pipeline taught
+things the design could not have known, and several of them contradicted this document. Where the
+measured world and the spec disagreed, the spec was wrong:
+
+| § | Change | Driver |
+|---|---|---|
+| 5, **5.1 (new)** | An asset's identity is a map from metric to vendor id, not one id. TRX, AVAX and POL corrected; coverage gaps for TRX/POL/BNB recorded as declared limits | Coin Metrics served the right metrics for the wrong entity: `trx_eth` is a near-dead ERC-20 wrapper, and Plan 1 put it in the panel as TRX |
+| 5, 15 | Gold and the dollar index added; both open questions resolved | Q1 and Q2 answered |
+| 5.1 | Protocol identity is a *list* of DefiLlama slugs, version-summed and rebrand-aware | "Maker" no longer exists in the feed; it is Sky Lending plus Sky Money. Uniswap, Aave, Compound and Synthetix each span multiple versions |
+| 7.4 | Bronze partitions carry `run_id` | Date-only partitioning made a same-day re-run destroy the earlier run's audit copy — the one thing the layer guarantees |
+| 8.1 | Facts key on `symbol`; `dim_asset` seeded from config; equity fact separated | Nothing joined the four sources: each keyed on its own vendor's identifier |
+| 9.1 | A fourth contract, per-source freshness, and the quarantine table | Equity markets close, so a global 48h SLA failed every Monday; and 14 impossible volume values needed somewhere honest to go |
+| 9.2 | Volume anomaly warns on a 30-observation window, an absolute bound blocks, null-rate ceilings added, gross fees floored but net revenue unbounded below, blocking scoped to mapped protocols | The original guard flagged 68.8% of healthy asset-days; the original revenue floor blocked the build on insurance, options and betting protocols whose negative revenue is real |
+| 10.1 | Applicability computed from declared dependencies and coverage; both volume definitions carried, never coalesced | The two sources' volume differs 5× on BTC, and velocity, NVT and P/U all turn on it |
+| 13 | Phase 2 absorbs a remediation stage and the holding-time correction | Every item above corrupts a method silently if found after the methods exist |
 
 ---
 
@@ -77,9 +95,9 @@ valuable single change in this project.
 
 ## 5. Asset scope
 
-23 cryptoassets — 22 valuation targets plus one stablecoin control — chosen against verified
-free-tier coverage, spanning the sectors each method family
-needs. Plus five equities to extend the dissertation's §8.4.4.
+24 cryptoassets — 22 valuation targets, one stablecoin control and one documented gap (SOL) —
+chosen against verified free-tier coverage, spanning the sectors each method family needs. Plus
+seven equities and macro series to extend the dissertation's §8.4.4.
 
 | Sector | Assets | Why |
 |---|---|---|
@@ -92,14 +110,62 @@ needs. Plus five equities to extend the dissertation's §8.4.4.
 | Metaverse | MANA | Continuity with §8.4.5 |
 | Stablecoin control | USDC | Velocity/EoE control group (Kampakis use USDT identically) |
 | Equities | TSLA, AAPL, AMZN, GOOGL, META | Extends §8.4.4 correlation analysis |
+| Macro | GC=F (gold), DX-Y.NYB (dollar index) | §15 Q1 resolved 2026-10-12: the macro-correlation question has become the more interesting one since 2022, and both series are two more tickers through an adapter that already works |
 
-**Known gap:** SOL is not in Coin Metrics' free 100-asset tier. It receives price and market-cap data
-from CoinGecko but no network metrics, so it is excluded from network-dependent methods rather than
-silently carried with nulls. AVAX and ALGO substitute for it. This is recorded, not hidden.
+**Known gaps, measured 2026-10-12 against the loaded panel.** Free-tier coverage is not uniform, and
+three assets carry limits that must reach the method layer as `applicable=False` with a reason rather
+than as quiet nulls:
+
+| Asset | Limit | Consequence |
+|---|---|---|
+| **SOL** | Absent from Coin Metrics' free tier (`CapMrktCurUSD` returns 403) | CoinGecko price and market cap only; excluded from every network-dependent method. AVAX and ALGO substitute |
+| **TRX** | See §5.1 — no free market cap, MVRV or supply on the real TRON series | Families A, B and D apply via CoinGecko market cap; the cost family (MVRV, realized cap, Thermocap, MVTV, Investor Cap) does not apply at all |
+| **POL** | History starts 2023-10-25 (1,082 days). The pre-rebrand MATIC series returns no data on the free tier, so **no splice is possible** | Excluded from long-horizon cointegration and factor work; short-window methods apply |
+| **BNB** | Market cap, MVRV and supply begin 2019-04-22 and are only 19% dense across the loaded window | Cost and MVRV families apply only where present; density is a method precondition, not a null to average over |
+
+**Survivorship bias** is addressed separately in §11.4. These are availability gaps, recorded rather
+than hidden — the opposite failure, carrying them as nulls into a mean, is what §9.2's null-rate
+ceiling now blocks.
 
 **Survivorship bias:** this set is chosen in 2026 with knowledge of which assets survived. The
 cross-sectional factor work (§11.4) therefore uses a separate point-in-time top-N universe rather
 than this curated list, and the limitation is stated in the report.
+
+### 5.1 Vendor identity and the conformed key
+
+**Added 2026-10-12.** Each vendor names assets its own way, and for three assets the free tier
+serves the right *metrics* under one id and the right *entity* under another. A single
+`cm_id` per asset cannot express that, and Plan 1's one-id-per-asset choice silently put the wrong
+entity in the panel for TRX.
+
+Measured on the free tier 2026-10-12:
+
+| Asset | Id serving network metrics | Id serving market cap / MVRV / supply | Reading |
+|---|---|---|---|
+| **TRX** | `trx` — real TRON. AdrActCnt, TxCnt, reported spot volume, price, with history to at least 2020-01-01 | *none free.* `trx_eth` serves them, but for the near-dead ERC-20 wrapper: market cap NULL on the latest day, volume 0, credible maximum volume $165K against real TRON's $254M/day | Take network metrics from `trx`, market cap from CoinGecko. MVRV and realized cap are unavailable, so the cost family does not apply |
+| **AVAX** | `avaxc` — the C-Chain, the genuine primary EVM chain, **not** a wrapper | `avaxc`, but it serves **no** reported spot volume (0% across the panel) | Take volume from `avax`, everything else from `avaxc`. This is why velocity was uncomputable for AVAX |
+| **POL** | `pol_eth` (7 metrics, from 2023-10-25) | `pol_eth` | `pol` serves only price and volume; `matic` returns no data. Short history is irreducible |
+
+**The rule this establishes.** An asset's identity is a *map from metric to vendor id*, not a single
+id. `config/assets.yml` carries that map; bronze and silver stay vendor-faithful, keyed by the
+vendor's own id, because rewriting a vendor's key in the landing zone would destroy the audit trail
+the layer exists for.
+
+**The conformed key is `symbol`.** Resolution from vendor id to symbol happens in the staging layer,
+and `dim_asset` is seeded from `assets.yml` — symbol, sector, consensus, `is_stablecoin`, and every
+vendor id as an attribute — rather than derived from whatever the panel happens to contain. Every
+fact table downstream of staging keys on `symbol`, which is what makes the four sources joinable at
+all: before this, Coin Metrics keyed on `trx_eth`, CoinGecko on `tron`, DefiLlama on protocol display
+names and yfinance on tickers, and nothing joined them.
+
+**Protocol identity is a list, not an id.** DefiLlama splits a protocol across versions and renames
+it on rebrand. Measured 2026-10-12: Uniswap is V4 ($1.37M fees/day) plus V3 ($451K) plus V2 ($40K)
+with the mix actively shifting from V3 to V4; Aave spans V2/V3/V4; Compound V2/V3; Synthetix four
+entries. MKR's revenue no longer appears under "Maker" at all — it is **Sky Lending** plus **Sky
+Money** after the rebrand. So `assets.yml` carries `defillama_slugs` as a *list* per asset, summed
+before any multiple or DCF is computed, and an unmapped asset returns `applicable=False` rather than
+zero. A single-version, pre-rebrand mapping would have produced confidently wrong DCF inputs for six
+of the seven DeFi assets.
 
 ---
 
@@ -112,7 +178,7 @@ than this curated list, and the limitation is stated in the report.
 | **Coin Metrics Community** | 31 catalogued series × 100 assets (including reference rates and completion timestamps): `CapMrktCurUSD`, `CapMVRVCur`, `HashRate`, `IssTotUSD`, `FeeTotNtv`, `AdrActCnt`, `AdrBalCnt`, `TxCnt`, `TxTfrCnt`, `SplyCur`, `FlowInExUSD`/`FlowOutExUSD`, `PriceUSD`, `ReferenceRate` | BTC 2026-10-05: mcap 1.725e12, MVRV 1.5967 |
 | **DefiLlama** | 2,991 protocols with fee/revenue data; 4,084 days of Ethereum fee history; per-protocol `methodology` field | Confirmed via `/overview/fees` and `/summary/fees/ethereum` |
 | **CoinGecko Demo** | price / market_cap / total_volume history — the EoE inputs, same source as Kampakis | Confirmed via `/market_chart` |
-| **yfinance** | Equity OHLCV for §8.4.4 | Standard |
+| **yfinance** | Equity OHLCV for §8.4.4, plus the gold and dollar-index macro series (§5) | Standard |
 
 ### 6.2 The key derivation
 
@@ -255,16 +321,24 @@ Coin Metrics Community and DefiLlama require no key, so there is very little sec
 ### 7.4 Layers
 
 - **bronze/** — immutable raw API responses as Parquet, landed per run under
-  `source=<s>/ingest_date=<d>/`, carrying `fetched_at`, endpoint, request params and response hash.
-  Never mutated; the audit trail and the replay source.
+  `source=<s>/ingest_date=<d>/run_id=<r>/`, carrying `fetched_at`, endpoint, request params and
+  response hash. Never mutated; the audit trail and the replay source.
+
+  **Revised 2026-10-12.** Plan 1 partitioned on `ingest_date` alone, which made a same-day re-run
+  *replace* the partition wholesale — so an operator re-running a subset of assets after a partial
+  failure destroyed the response record of everything fetched earlier that day. That contradicted
+  this layer's one guarantee. Adding `run_id` to the path makes every run its own partition: nothing
+  is ever overwritten, re-running a subset is safe, and the cost is disk measured in megabytes
+  (bronze was 6.3 MB at the end of Plan 1). Readers take the latest `run_id` per `ingest_date` unless
+  they are explicitly auditing a past run.
 - **silver/** — conformed, typed, tested. The bi-temporal SCD2 panel (§8.2) and the dimensions.
   Compacted to `year=` partitions.
 - **gold/** — derived metrics, valuation estimates, model scores.
 - **marts/** — the two consumers: research tables/figures and the dashboard's wide table.
 
 **Partition sizing.** Daily partitions in silver/gold would create ~4,000 files of ~20 KB — a
-textbook small-file problem. Bronze stays per-run date-partitioned for idempotency and audit;
-silver and gold compact to yearly partitions via an explicit compaction task.
+textbook small-file problem. Bronze stays per-run partitioned for idempotency and audit; silver and
+gold compact to yearly partitions via an explicit compaction task.
 
 ---
 
@@ -274,11 +348,12 @@ silver and gold compact to yearly partitions via an explicit compaction task.
 
 | Table | Grain | Notes |
 |---|---|---|
-| `dim_asset` | asset | **SCD2 on sector/classification** (§8.3); SCD1 on cosmetic attributes |
+| `dim_asset` | symbol | **Seeded from `config/assets.yml`** (§5.1), not derived from the panel: symbol, sector, consensus, `is_stablecoin`, every vendor id, and the metric-to-id map. **SCD2 on sector/classification** (§8.3); SCD1 on cosmetic attributes |
 | `dim_date` | date | Carries `halving_epoch`, `days_since_halving`, `cycle_phase` — makes cycle analysis a join, not a recalculation |
 | `dim_method` | method_id | Family, formula, citation, assumptions, failure modes, data dependencies. Makes "which methods disagree and why" a SQL question, and is the source of the method cards |
-| `fct_asset_metrics_daily` | (asset, date) | The conformed panel |
-| `fct_protocol_revenue_daily` | (protocol, date) | DefiLlama fees/revenue, with methodology hash |
+| `fct_asset_metrics_daily` | (symbol, date) | The conformed panel. Keyed on **symbol** (§5.1), joining Coin Metrics network metrics, CoinGecko price/market cap/volume and the resolved vendor ids. Carries **both** volume definitions as distinct columns |
+| `fct_protocol_revenue_daily` | (protocol, date) | DefiLlama fees/revenue, with methodology hash. Rolled up to `symbol` through the `defillama_slugs` list (§5.1), summing versions |
+| `fct_equity_prices_daily` | (ticker, date) | yfinance equities and macro series (§5), kept a separate fact: different calendar, different freshness SLA, no network metrics |
 | `fct_valuation_estimate` | (asset, date, method_id, param_set_hash) | Method registry output. `param_set_hash` lets a DCF at 12% and at 16% coexist as rows rather than overwrite |
 | `fct_model_score` | (model_id, asset, fold, horizon, metric) | Walk-forward results. The naive baseline is stored as just another `model_id`, so "did it beat the random walk" is a query, not a claim |
 | `obt_asset_valuation_wide` | (asset, date) | Methods pivoted; the single table Streamlit reads |
@@ -328,9 +403,23 @@ arguments — which is also what makes the Phase 6 scheduler a thin wrapper.
 ### 9.1 Contracts
 
 One YAML contract per source — `coinmetrics_asset_metrics`, `defillama_fees`,
-`coingecko_market_chart` — each carrying schema, owner, semantic-versioning rules (which changes are
-breaking) and quality SLAs: freshness (T+1 by 02:00 UTC), completeness, uniqueness on
-(asset, metric_date), validity ranges, and volume anomaly thresholds.
+`coingecko_market_chart`, `equity_prices` — each carrying schema, owner, semantic-versioning rules
+(which changes are breaking) and quality SLAs: freshness, completeness, uniqueness on
+(asset, metric_date), validity ranges, per-column null-rate ceilings, and volume anomaly thresholds.
+
+**Freshness is per source, not global.** The original T+1-by-02:00-UTC SLA assumed a market that
+never closes. Equities do: a Monday morning check sees Friday's close, so `equity_prices` allows 144
+hours, measured from the worst healthy week observed. Crypto sources keep 48.
+
+**Quarantine, added 2026-10-12.** Some vendor values are impossible rather than merely extreme — the
+loaded panel carries 14 reported-spot-volume figures between 1e36 and 1e55 USD against a credible
+maximum of 2.3e10, concentrated on `usdc` (12) and `trx_eth` (2). Dropping the whole row would
+discard the healthy market cap sitting beside the bad volume, and carrying the value poisons every
+velocity figure downstream. So the offending **cell** is nulled in silver and the full record written
+to `silver/quarantine` — `(source, asset, metric_date, column, raw_value, reason, run_id)` — with
+bronze untouched, so the raw value is always recoverable. Quarantine row-count is itself a monitored
+metric: a jump means the vendor broke something new. This is the one place silver deviates from the
+vendor's numbers, and it is logged rather than silent.
 
 ### 9.2 Domain-specific guards
 
@@ -339,15 +428,19 @@ These matter more than the generic checks:
 | Guard | Rationale |
 |---|---|
 | **Identity assertions**: `mvrv × realized_cap ≈ market_cap`; `supply × price ≈ market_cap`; `thermocap` monotonically non-decreasing; `liveliness + vaultedness = 1` | Realized cap is *derived* from an identity (§6.2). If either input's definition shifts upstream, everything downstream is silently wrong. The single most important test in the project |
-| **Volume anomaly threshold** (±50% vs trailing average) | A DefiLlama methodology revision can 10× a protocol's fees overnight and silently corrupt a DCF |
+| **Volume anomaly threshold** (±50% vs a trailing 30-observation mean) — **warns, does not block** | A DefiLlama methodology revision can 10× a protocol's fees overnight and silently corrupt a DCF. Calibrated against live data 2026-10-11: measured as deviation from an all-time expanding mean it flagged 68.8% of asset-days, because a decade of secular growth reads as a permanent anomaly. On a 30-observation baseline it still flags 34.1% of Coin Metrics asset-days, and no ratio threshold separates Bitcoin Cash's fork day (+246×) or DOGE 2020 (+102×) from vendor garbage. A gate that fires on a third of healthy days is noise, so the ratio warns and an absolute bound blocks |
+| **Absolute volume bound** of 1.0e+12 USD — **blocks** | Catches exactly the impossible values (the 14 rows above) and nothing else; the largest credible figure in the same panel is 7.5e10. Residual limit, accepted: a vendor-wide systematic rescale that stays under the bound only warns, because no ratio test distinguishes it from a market event |
+| **Per-column null-rate ceiling** — **blocks** | The guard §9.1 promises. A metric silently withdrawn from the feed arrives present-and-all-null, which passes required-columns, uniqueness, not-null and range checks alike; nothing else detects a column going wholly null. Ceilings are calibrated from observed nullity with headroom — market cap 11.7% observed against a 30% ceiling, volume 6.3% against 25%, net revenue 21.8% against 45% |
 | **Methodology hash** on DefiLlama's `methodology` field | The field is in the API response; hashing it converts an invisible upstream redefinition into a failed build |
 | **Free-tier availability check** | `CapMVRVCur` is free *today*. If it moves to Pro, the contract fails loudly rather than the panel going half-null |
 | **Supply monotonicity** for fixed-supply assets | Catches source-side unit or scaling errors |
+| **Gross fees ≥ 0**, but **net revenue unbounded below** | Corrected 2026-10-12. The original contract floored all three revenue columns at zero, which is economically wrong for net revenue and was blocking the build on 24 protocols. Negative net revenue is *real*: Ensuro is insurance (claims above premiums), Hegic options (writers lost), WINR and Azuro betting (the house lost), and Fragment shows $1.05M gross fees against −$852K net revenue, which is a rebate structure working as designed. Gross fees cannot be negative, so those rows are vendor errors and go to quarantine |
+| **Blocking scope is the valuation universe** | The revenue feed carries 2,991 protocols; at most a handful map to our assets (§5.1). Garbage in the long tail must not block a build that will never value it, so contract failures block only for mapped protocols and warn for the rest |
 
 ### 9.3 Tooling decision
 
 **dbt tests as primary; Great Expectations rejected.** dbt is already in the stack, is lineage-aware
-and costs nothing extra; GE would be a second overlapping framework for a 23-asset panel. Cross-row and
+and costs nothing extra; GE would be a second overlapping framework for a 24-asset panel. Cross-row and
 cross-table checks (identity assertions, distribution drift) live in a small Python check module
 invoked by the same task graph.
 
@@ -387,6 +480,20 @@ Methods are pure functions over the panel. Adding one is a module plus a YAML co
 comparable — and the comparison *is* the research output. Methods declare their data dependencies,
 so a method whose inputs are unavailable (e.g. Cointime before the §6.3 backfill) returns
 `applicable=False` with a reason rather than a fabricated number.
+
+**Applicability is computed, not hand-written** (added 2026-10-12). A method declares the columns it
+needs and a minimum coverage density; the registry resolves `applicable` against the panel and the
+§5 gap table, so TRX's missing MVRV, AVAX's missing Coin Metrics volume and BNB's 19%-dense market
+cap each produce one declared refusal with a reason instead of per-method special cases. The
+`consensus` field already in `config/assets.yml` predicts the proof-of-work methods exactly: hash
+rate exists on the free tier for BTC, LTC, BCH and DOGE, plus ETH to the Merge at 63.7% density.
+
+**Volume discipline, the §10.4 denominator rule applied to `T`** (added 2026-10-12). Coin Metrics'
+reported spot volume and CoinGecko's total volume are different series with different exchange
+coverage — measured 2.97e9 against 1.48e10 for BTC on the same day, a 5× gap. Velocity, NVT and
+Price-to-Utility all turn on `T`, so the two are carried as distinct columns, never coalesced; each
+method names which it used in `inputs_used`, and the headline results report both as a sensitivity.
+A method that silently picked one would make its own fair value unreproducible.
 
 Alternatives rejected: per-method vertical slices (duplicated IO; methods that fetched different
 data on different days cannot be honestly compared) and SQL-only in dbt (DCF sensitivity grids,
@@ -584,7 +691,8 @@ volatile and these methods disagree by design.
 |---|---|---|
 | **0 — Foundation** | Repo scaffold, config-as-code, DuckDB + dbt-core with dual targets, Dockerfile, CI, path resolver, byte-budget gate, three data contracts, one source end-to-end | `make all` runs green on a fixture sample in CI |
 | **1 — Ingestion** | Coin Metrics, DefiLlama, CoinGecko, yfinance → bronze; SCD2 silver panel; star schema dimensions; trailing-window refetch; compaction; identity assertions | Full history loaded; every contract test passing; a point-in-time query reconstructs a past vintage |
-| **2 — Reproduce the dissertation** | Families A, B, D, E(a) — QTM, J-curve, Metcalfe, NVT, P/U, Hayes, Thermocap, MVTV, MVRV, Investor Cap | Every dissertation method produces estimates with a method card; results compared against the figures in the PDF |
+| **2a — Remediation** *(added 2026-10-12)* | The §5.1 conformed key and vendor-id map; DefiLlama slug lists; quarantine; the §9.1-9.2 contract corrections; bronze `run_id`; dead column removal; re-backfill | `make validate` exits 0 on live data with every failure either fixed or quarantined with a reason; the panel joins all four sources on `symbol` |
+| **2b — Reproduce the dissertation** | Families A, B, D, E(a) — QTM, J-curve, Metcalfe, NVT, P/U, Hayes, Thermocap, MVTV, MVRV, Investor Cap, **plus the holding-time correction** | Every dissertation method produces estimates with a method card; results compared against the figures in the PDF |
 | **3a — Modern layer (free data)** | Family C (DCF and the counter-model), remaining multiples, Family F benchmark shelf | DCF sensitivity grids reproduce published reference valuations within a stated tolerance |
 | **3b — UTXO extraction** *(background, spans months)* | BigQuery sandbox staged epoch-by-epoch behind the byte gate and monthly ledger, materialised to our own Parquet → Family E(b) Cointime, HODL waves, SLRV/STHPL/RPV | All epochs extracted; Cointime identities hold (`liveliness + vaultedness = 1`); family flips from `applicable=False` to live in one step |
 | **4 — Statistical rebuild** | §11 in full: baselines, walk-forward, DM tests, econometrics, factor models, multiple-testing correction | Every model has a DM p-value against persistence; `fct_model_score` populated including baselines |
@@ -594,6 +702,17 @@ volatile and these methods disagree by design.
 Phases 2 and 3a are deliberately ordered so the dissertation's methods form a **verified baseline**
 before new methods are layered on. If a reproduction disagrees with the PDF, that is diagnosed before
 anything is built on top of it.
+
+**Why 2a exists** (added 2026-10-12). Each item in it was found by querying the panel Plan 1
+produced, and each one silently corrupts a method rather than failing it: a TRX velocity computed
+from a dead wrapper, a UNI DCF against an unmapped protocol, a mean taken over a 19%-dense column.
+A wrong number that looks right is far more expensive to find in Phase 4's backtests than to fix
+now, so remediation precedes the method registry rather than trailing it.
+
+**Why the holding-time correction sits in 2b rather than 3a.** It is formally a modern addition, but
+§10.2's finding is that mean holding time and `1/V` differ at the mean, which invalidates the
+inversion the dissertation's own QTM and P/U sections rely on. Reproducing those two methods without
+it would reproduce a known error and call it a baseline.
 
 ### Deployment tier notes
 
@@ -628,10 +747,18 @@ anything is built on top of it.
 **Resolved 2026-10-11:** BigQuery backfill — free only, staged inside the sandbox’s monthly free
 terabyte. No payment, now or later, without an explicit new decision. See §6.3.
 
-1. **Equity set** — keep the dissertation's five tech stocks for comparability, or add gold and DXY,
-   given that the macro-correlation question has become more interesting since 2022?
-2. **Report format** — Markdown plus generated figures, Quarto, or a LaTeX document matching the
-   dissertation's presentation?
+**Resolved 2026-10-12 — Q1, equity set:** keep all five tech stocks *and* add gold (`GC=F`) and the
+dollar index (`DX-Y.NYB`). The five are not negotiable, because the "2022 findings vs 2026" chapter
+needs them for comparability; the two macro series are two more tickers through an adapter that
+already works, and the macro-correlation question is the more interesting one now. Recorded in §5.
+
+**Resolved 2026-10-12 — Q2, report format:** Quarto. It executes Python inline, which makes §12's
+"every figure regenerates from `make all`" structurally true instead of a discipline to maintain; it
+renders both HTML and PDF, so the report can sit beside the dissertation and next to the dashboard;
+and it handles cross-references and citations natively. Markdown plus figures cannot guarantee
+regeneration, and LaTeX alone forfeits the HTML path.
+
+**No open questions remain.** New ones are recorded here with their resolution date as they arise.
 
 ---
 
