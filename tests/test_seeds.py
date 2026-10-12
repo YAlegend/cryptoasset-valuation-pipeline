@@ -73,3 +73,14 @@ def test_the_seeds_are_deterministic(tmp_path):
               for p in write_asset_seeds(assets, str(tmp_path / "b"))]
     # Committed generated files must not churn, or every run dirties the tree.
     assert first == second
+
+
+def test_the_committed_seeds_match_what_config_generates(tmp_path):
+    _, assets = load_config()
+    fresh = write_asset_seeds(assets, str(tmp_path))
+    repo = pathlib.Path(__file__).parent.parent
+    for path in fresh:
+        committed = repo / "dbt" / "seeds" / pathlib.Path(path).name
+        assert committed.read_bytes() == pathlib.Path(path).read_bytes(), (
+            f"{committed} is stale against config/assets.yml; run `make seed` and commit it"
+        )
