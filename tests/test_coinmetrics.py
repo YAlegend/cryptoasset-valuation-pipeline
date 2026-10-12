@@ -235,3 +235,39 @@ def test_reported_spot_volume_parses_as_a_number_and_keeps_its_nulls(load_fixtur
     assert btc["volume_reported_spot_usd_1d"].iloc[0] == pytest.approx(2.2819828752e10)
     eth = df[df["asset"] == "eth"]
     assert eth["volume_reported_spot_usd_1d"].isna().all()
+
+
+def test_fetch_requests_every_configured_vendor_id():
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(dict(request.url.params))
+        return httpx.Response(200, json={"data": [
+            {"asset": "avaxc", "time": "2026-10-01T00:00:00.000000000Z", "PriceUSD": "30.0"},
+        ]})
+
+    assets = [
+        Asset(symbol="AVAX", sector="smart_contract_l1", consensus="pos", cm_id="avaxc",
+              gecko_id="avalanche-2", metric_sources={"volume": "cm:avax"}),
+        Asset(symbol="BTC", sector="pow_monetary", consensus="pow", cm_id="btc"),
+    ]
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        CoinMetricsSource().fetch(dt.date(2026, 10, 1), dt.date(2026, 10, 2), assets, client)
+
+    # Sorted union, so avax rides along with avaxc rather than replacing it.
+    assert captured["assets"] == "avax,avaxc,btc"
+
+
+def test_status_sidecar_columns_are_dropped():
+    payload = {"data": [{
+        "asset": "btc",
+        "time": "2026-10-01T00:00:00.000000000Z",
+        "FlowInExUSD": "1000.0",
+        "FlowInExUSD-status": "unavailable",
+        "FlowInExUSD-status-time": "2026-10-01T00:00:00.000000000Z",
+        "FlowOutExUSD-status": "unavailable",
+    }]}
+    df = parse_timeseries(payload)
+    assert [c for c in df.columns if "status" in c] == []
+    # The metric itself survives; only the sidecars go.
+    assert df["FlowInExUSD"].iloc[0] == 1000.0

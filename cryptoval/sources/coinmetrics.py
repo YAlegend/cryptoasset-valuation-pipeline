@@ -51,6 +51,11 @@ def parse_timeseries(payload: dict) -> pd.DataFrame:
         return pd.DataFrame(columns=["asset", "metric_date"])
     df["metric_date"] = pd.to_datetime(df["time"], utc=True).dt.normalize()
     df = df.drop(columns=["time"])
+    # Coin Metrics returns "<metric>-status" and "<metric>-status-time" beside some metrics.
+    # On the live panel all three are 100% empty, and they are strings in a numeric frame.
+    sidecars = [c for c in df.columns if c.endswith(("-status", "-status-time"))]
+    if sidecars:
+        df = df.drop(columns=sidecars)
     for col in df.columns:
         if col not in _NON_METRIC_COLUMNS:
             # errors="coerce" turns genuine nulls into NaN; it must never
@@ -87,7 +92,9 @@ class CoinMetricsSource:
         assets: list[Asset],
         client: httpx.Client,
     ) -> FetchResult:
-        ids = [a.cm_id for a in assets if a.cm_id]
+        # The union, not one id per asset: three assets draw different metric groups from
+        # different Coin Metrics series (spec 5.1), so both ids must be requested.
+        ids = sorted({cm_id for a in assets for cm_id in a.cm_ids})
         if not ids:
             return FetchResult(pd.DataFrame(columns=["asset", "metric_date"]), 0)
 
