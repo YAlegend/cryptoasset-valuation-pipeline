@@ -53,11 +53,51 @@ VOLUME_CHECKS = {
     "coinmetrics": ("asset", ["volume_reported_spot_usd_1d"]),
 }
 
-# Only DefiLlama has a long tail: it serves 2,991 protocols of which a handful map to an
-# asset we value. A contract failure on an unmapped protocol is real but not ours to
-# block on, so it warns (spec 9.2). Every other source is entirely in scope.
-SCOPED_SOURCES = {"defillama"}
-SCOPE_KEY = {"defillama": "protocol"}
+# A contract failure blocks only for an entity in the valuation universe (spec 9.2). DefiLlama
+# serves 2,991 protocols of which a handful map to an asset we value; Coin Metrics and
+# CoinGecko can hold an id config no longer maps (a retired ERC-20 wrapper whose data
+# predates quarantine). Neither reaches a mart or a method, so a vendor error there is real
+# but not ours to block on: it warns and names the id. Equities are entirely in scope.
+SCOPE_KEY = {"defillama": "protocol", "coinmetrics": "asset", "coingecko": "asset"}
+SCOPED_SOURCES = set(SCOPE_KEY)
+_SCOPE_LABEL = {
+    "defillama": "defillama_slugs",
+    "coinmetrics": "cm_id/metric_sources",
+    "coingecko": "gecko_id",
+}
+_MAX_NAMED = 8
+
+
+def _universe(assets: list[Asset]) -> dict[str, set[str]]:
+    """The entity ids each scoped source is allowed to block on, derived from config."""
+    return {
+        "defillama": {slug for a in assets for slug in a.defillama_slugs},
+        "coinmetrics": {i for a in assets for i in a.cm_ids},
+        "coingecko": {a.gecko_id for a in assets if a.gecko_id},
+    }
+
+
+def _unmapped_warnings(
+    table: str, unscoped: pd.DataFrame, key: str, contract: Contract
+) -> list[str]:
+    """One warning per failing check on out-of-universe entities, naming the entities."""
+    now = dt.datetime.now(dt.UTC)
+    failed = {r.name: r.detail for r in run_checks(unscoped, contract, now=now) if not r.passed}
+    if not failed:
+        return []
+    culprits: dict[str, list[str]] = {name: [] for name in failed}
+    for entity, group in unscoped.groupby(key):
+        for result in run_checks(group, contract, now=now):
+            if not result.passed and result.name in culprits:
+                culprits[result.name].append(str(entity))
+    out = []
+    for name, detail in failed.items():
+        ids = culprits[name]
+        shown = ", ".join(ids[:_MAX_NAMED])
+        if len(ids) > _MAX_NAMED:
+            shown += f" +{len(ids) - _MAX_NAMED} more"
+        out.append(f"{table}/{name} [unmapped: {shown or 'pooled'}]: {detail}")
+    return out
 
 
 def assert_unique_symbols(assets: list[Asset]) -> None:
@@ -201,12 +241,7 @@ class Validation:
 def run_validate(settings: Settings, assets: list[Asset]) -> Validation:
     failures: list[str] = []
     warnings: list[str] = []
-    in_scope = {slug for a in assets for slug in a.defillama_slugs}
-    if not in_scope:
-        warnings.append(
-            "no defillama_slugs configured on any asset, so every protocol is unmapped "
-            "and its contract failures only warn"
-        )
+    universe = _universe(assets)
 
     for name, table in SILVER_TABLE.items():
         history = _read_silver(settings, table)
@@ -218,11 +253,16 @@ def run_validate(settings: Settings, assets: list[Asset]) -> Validation:
         contract = load_contract(SOURCES[name].contract_path)
 
         scoped, unscoped = df, df.iloc[0:0]
-        if name in SCOPED_SOURCES:
-            key = SCOPE_KEY[name]
-            if key in df.columns:
-                mask = df[key].isin(in_scope)
-                scoped, unscoped = df[mask], df[~mask]
+        key = SCOPE_KEY.get(name)
+        if key and key in df.columns:
+            in_scope = universe[name]
+            if not in_scope:
+                warnings.append(
+                    f"no {_SCOPE_LABEL[name]} configured on any asset, so every {key} is "
+                    "unmapped and its contract failures only warn"
+                )
+            mask = df[key].isin(in_scope)
+            scoped, unscoped = df[mask], df[~mask]
 
         for result in run_checks(scoped, contract, now=dt.datetime.now(dt.UTC)):
             if not result.passed:
@@ -232,9 +272,7 @@ def run_validate(settings: Settings, assets: list[Asset]) -> Validation:
                 failures.append(f"{table}/{result.name}: {result.detail}")
 
         if not unscoped.empty:
-            for result in run_checks(unscoped, contract, now=dt.datetime.now(dt.UTC)):
-                if not result.passed:
-                    warnings.append(f"{table}/{result.name} [unmapped]: {result.detail}")
+            warnings.extend(_unmapped_warnings(table, unscoped, key, contract))
 
         warnings.extend(_volume_anomaly_warnings(name, table, df, contract))
     return Validation(failures, warnings)

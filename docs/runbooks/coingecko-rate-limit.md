@@ -70,3 +70,29 @@ internal backoff cannot clear a limit that the pass itself keeps re-tripping.
 **Act:** the default is now `6.0` (about 10 calls a minute), so a 24-asset pass
 takes roughly 2.5 minutes before any retry. That is the remedy step 1 above
 prescribes. If 429s return, raise it again rather than retrying at the old pace.
+
+## Measured: even 6 s pacing clears only part of a 24-asset pass (2026-10-12)
+
+With `sleep_between_assets_s = 6.0`, three full-list `ingest --trailing-days 300 --sources coingecko`
+runs (after cool-downs of 0, 3 and 10 minutes) all ended `status: partial` on HTTP 429:
+
+| Run | Assets stored | Rows | Failed at |
+|-----|---------------|------|-----------|
+| 1   | about 9       | 2709 | `tron` |
+| 2   | about 7       | 2107 | `avalanche-2` |
+| 3   | about 9       | 2709 | `tron` |
+
+The failure point is deterministic: each pass fetches the same leading assets and stops at the
+first 429 (the adapter keeps what it has and stops, by design), so repeating the full list
+re-fetches the same head and the tail never arrives. A longer cool-down did not change that.
+
+**What survives:** silver accumulates across passes. SCD2 only touches the keys present in the
+incoming frame, so an earlier run's assets are not lost, and bronze lands each run in its own
+`run_id=` partition.
+
+**Practical consequence:** `velocity_total` and the SOL/TRX market-cap fill reach completeness over
+several runs, not in one. Until the tail assets have been fetched at least once, treat CoinGecko
+coverage as incomplete (`market_chart` holds only the assets some pass reached).
+
+**Not done here, deliberately:** a CLI asset filter (to fetch only the missing tail), a change to
+the stop-on-429 semantics, and a further rise in pacing. They are real options for a later plan.

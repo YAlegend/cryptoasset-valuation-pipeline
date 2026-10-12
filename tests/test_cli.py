@@ -196,7 +196,9 @@ _UNIVERSE = [
     Asset(
         symbol="UNI", sector="defi", consensus="other", cm_id="uni", gecko_id="uniswap",
         defillama_slugs=("A", "B", "small", "huge"),
-    )
+    ),
+    Asset(symbol="BTC", sector="store_of_value", consensus="pow", cm_id="btc", gecko_id="bitcoin"),
+    Asset(symbol="USDC", sector="stablecoin", consensus="other", cm_id="usdc", gecko_id="usd-coin"),
 ]
 
 
@@ -538,9 +540,10 @@ def test_an_unmapped_protocols_failure_warns_while_a_mapped_one_blocks(tmp_path)
     assert [f for f in report.failures if "protocol_revenue/ranges" in f]
 
 
-def test_scoping_leaves_the_other_sources_blocking():
-    """Only DefiLlama has a long tail. An asset-metrics defect always blocks."""
-    assert cli.SCOPED_SOURCES == {"defillama"}
+def test_scoping_leaves_equities_blocking():
+    """Equities are entirely in scope; the three vendors with entities outside it are scoped."""
+    assert cli.SCOPED_SOURCES == {"defillama", "coinmetrics", "coingecko"}
+    assert "equities" not in cli.SCOPE_KEY
 
 
 def test_an_empty_mapping_warns_rather_than_silently_passing_every_protocol(
@@ -556,9 +559,37 @@ def test_an_empty_mapping_warns_rather_than_silently_passing_every_protocol(
     assert report.failures == []
 
 
-def test_a_mapped_assets_other_sources_are_not_scoped(tmp_path, monkeypatch):
-    """Scoping must not reach asset_metrics: a negative cap blocks whatever the asset."""
-    _publish(tmp_path, "asset_metrics", _cm_frame(-5.0), ["asset", "metric_date"])
+def test_an_impossible_volume_blocks_for_a_configured_id_and_only_warns_for_an_unmapped_one(
+    tmp_path, monkeypatch
+):
+    """trx_eth was dropped from config but its pre-quarantine rows remain in silver. No mart
+    reads it, so its impossible value warns (naming the id); the same value under a
+    configured id still blocks, and the 1e12 bound has not moved."""
     settings = _validate_settings(tmp_path, monkeypatch, "coinmetrics")
-    bare = [Asset(symbol="BTC", cm_id="btc")]
-    assert [f for f in run_validate(settings, bare).failures if "ranges" in f]
+    spike = 8.18e47
+
+    def _publish_volume(entity):
+        frame = _steady_then_spike(entity, "volume_reported_spot_usd_1d", spike=spike)
+        _publish(tmp_path, "asset_metrics", frame, ["asset", "metric_date"])
+
+    _publish_volume("trx_eth")
+    report = run_validate(settings, _UNIVERSE)
+    assert not [f for f in report.failures if "ranges" in f]
+    named = [w for w in report.warnings if "asset_metrics/ranges [unmapped: trx_eth]" in w]
+    assert len(named) == 1 and "volume_reported_spot_usd_1d > 1" in named[0]
+
+    _publish_volume("usdc")  # configured in _UNIVERSE
+    blocked = [f for f in run_validate(settings, _UNIVERSE).failures if "ranges" in f]
+    assert len(blocked) == 1 and "volume_reported_spot_usd_1d > 1" in blocked[0]
+
+
+def test_an_unmapped_coingecko_id_only_warns_too(tmp_path, monkeypatch):
+    _publish(
+        tmp_path,
+        "market_chart",
+        _panel([("old-token", "2026-10-09", -3.0)], "price_usd"),
+        ["asset", "metric_date"],
+    )
+    report = run_validate(_validate_settings(tmp_path, monkeypatch, "coingecko"), _UNIVERSE)
+    assert [w for w in report.warnings if "[unmapped: old-token]" in w]
+    assert not [f for f in report.failures if "ranges" in f]
