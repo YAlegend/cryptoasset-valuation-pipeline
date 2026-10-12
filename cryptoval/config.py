@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import os
 import pathlib
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 
 import yaml
 
@@ -21,6 +22,12 @@ SECTORS = (
     "stablecoin",
 )
 CONSENSUS = ("pow", "pos", "other", "na")
+METRIC_GROUPS = ("network", "valuation", "volume")
+
+# A metric source is one Coin Metrics id, CoinGecko, or an explicit refusal. The lowercase
+# pattern is deliberate: Coin Metrics ids are lowercase, and silently accepting "CM:X" would
+# produce a 404 on the first live fetch instead of a config error here.
+_SOURCE_PATTERN = re.compile(r"^(cm:[a-z0-9_]+|coingecko|none)$")
 
 
 @dataclass(frozen=True)
@@ -33,6 +40,26 @@ class Asset:
     yahoo_id: str | None = None
     is_stablecoin: bool = False
     is_equity: bool = False
+    # Group -> source. Unmapped groups fall back to the primary cm_id (spec 5.1), so only
+    # the three assets whose vendor identity is split need an entry here.
+    metric_sources: dict[str, str] = field(default_factory=dict)
+    defillama_slugs: tuple[str, ...] = ()
+    coverage_note: str = ""
+
+    def source_for(self, group: str) -> str:
+        if group not in METRIC_GROUPS:
+            raise ValueError(f"unknown metric group {group!r}; expected one of {METRIC_GROUPS}")
+        explicit = self.metric_sources.get(group)
+        if explicit:
+            return explicit
+        if self.cm_id:
+            return f"cm:{self.cm_id}"
+        return "none" if group == "network" else "coingecko"
+
+    @property
+    def cm_ids(self) -> tuple[str, ...]:
+        ids = {s[len("cm:") :] for s in map(self.source_for, METRIC_GROUPS) if s.startswith("cm:")}
+        return tuple(sorted(ids))
 
 
 @dataclass(frozen=True)
@@ -57,6 +84,20 @@ def _validate(asset: Asset) -> None:
         raise ValueError(f"{asset.symbol}: unknown sector {asset.sector!r}")
     if asset.consensus not in CONSENSUS:
         raise ValueError(f"{asset.symbol}: unknown consensus {asset.consensus!r}")
+    for group, source in asset.metric_sources.items():
+        if group not in METRIC_GROUPS:
+            raise ValueError(
+                f"{asset.symbol}: unknown metric group {group!r}; expected one of {METRIC_GROUPS}"
+            )
+        if not _SOURCE_PATTERN.match(str(source)):
+            raise ValueError(
+                f"{asset.symbol}: unusable metric source {source!r} for group {group!r}; "
+                "expected 'cm:<id>', 'coingecko' or 'none'"
+            )
+        if source == "coingecko" and not asset.gecko_id:
+            raise ValueError(f"{asset.symbol}: group {group!r} names coingecko but has no gecko_id")
+    if any(not str(slug).strip() for slug in asset.defillama_slugs):
+        raise ValueError(f"{asset.symbol}: defillama_slugs contains an empty entry")
     if not asset.cm_id and not asset.gecko_id:
         raise ValueError(f"{asset.symbol}: no usable source id")
 
@@ -72,10 +113,17 @@ def load_config(config_dir: str = "config") -> tuple[Settings, list[Asset]]:
 
     raw_assets = yaml.safe_load((base / "assets.yml").read_text(encoding="utf-8")) or {}
     assets: list[Asset] = []
+
+    def _build(row: dict, *, is_equity: bool) -> Asset:
+        row = dict(row)
+        row["defillama_slugs"] = tuple(row.get("defillama_slugs") or ())
+        row["metric_sources"] = dict(row.get("metric_sources") or {})
+        return Asset(is_equity=is_equity, **row)
+
     for row in raw_assets.get("assets", []) or []:
-        assets.append(Asset(**row))
+        assets.append(_build(row, is_equity=False))
     for row in raw_assets.get("equities", []) or []:
-        assets.append(Asset(is_equity=True, **row))
+        assets.append(_build(row, is_equity=True))
     for a in assets:
         _validate(a)
     return settings, assets

@@ -1,6 +1,6 @@
 import pytest
 
-from cryptoval.config import SECTORS, load_config
+from cryptoval.config import METRIC_GROUPS, SECTORS, Asset, _validate, load_config
 
 
 def test_loads_settings():
@@ -15,7 +15,8 @@ def test_loads_full_universe():
     crypto = [a for a in assets if not a.is_equity]
     equities = [a for a in assets if a.is_equity]
     assert len(crypto) == 24      # 23 valuation targets plus SOL, which has no CM id
-    assert len(equities) == 5
+    # five single-name equities plus gold and the dollar index (spec 15 Q1, resolved)
+    assert len(equities) == 7
 
 
 def test_sol_has_no_coinmetrics_id_recording_the_documented_gap():
@@ -70,3 +71,57 @@ def test_empty_data_root_is_rejected(tmp_path, monkeypatch):
     (tmp_path / "assets.yml").write_text("assets: []\n")
     with pytest.raises(ValueError, match="data_root"):
         load_config(str(tmp_path))
+
+
+def test_trx_draws_network_metrics_from_the_real_tron_series():
+    _, assets = load_config()
+    trx = next(a for a in assets if a.symbol == "TRX")
+    # trx_eth is a near-dead ERC-20 wrapper: market cap NULL, volume 0, $165K credible max
+    # against real TRON's $254M/day (spec 5.1).
+    assert trx.source_for("network") == "cm:trx"
+    assert trx.source_for("volume") == "cm:trx"
+    # Coin Metrics serves no free market cap for `trx`, so it comes from CoinGecko.
+    assert trx.source_for("valuation") == "coingecko"
+    assert trx.cm_ids == ("trx",)
+
+
+def test_avax_takes_volume_from_a_different_coin_metrics_id():
+    _, assets = load_config()
+    avax = next(a for a in assets if a.symbol == "AVAX")
+    # avaxc is the genuine C-Chain, but serves no reported spot volume (0% of the panel).
+    assert avax.source_for("network") == "cm:avaxc"
+    assert avax.source_for("valuation") == "cm:avaxc"
+    assert avax.source_for("volume") == "cm:avax"
+    assert avax.cm_ids == ("avax", "avaxc")
+
+
+def test_an_unmapped_asset_defaults_every_group_to_its_primary_id():
+    _, assets = load_config()
+    btc = next(a for a in assets if a.symbol == "BTC")
+    assert [btc.source_for(g) for g in METRIC_GROUPS] == ["cm:btc"] * 3
+    assert btc.cm_ids == ("btc",)
+
+
+def test_an_asset_with_no_coin_metrics_id_falls_back_to_coingecko():
+    _, assets = load_config()
+    sol = next(a for a in assets if a.symbol == "SOL")
+    assert sol.source_for("network") == "none"
+    assert sol.source_for("valuation") == "coingecko"
+    assert sol.cm_ids == ()
+
+
+def test_an_unknown_metric_group_is_rejected():
+    with pytest.raises(ValueError, match="unknown metric group"):
+        _validate(Asset(symbol="X", sector="defi", cm_id="x", metric_sources={"nope": "cm:x"}))
+
+
+def test_a_malformed_metric_source_is_rejected():
+    with pytest.raises(ValueError, match="unusable metric source"):
+        _validate(Asset(symbol="X", sector="defi", cm_id="x", metric_sources={"volume": "CM:X"}))
+
+
+def test_a_valuation_group_pointing_at_coingecko_requires_a_gecko_id():
+    with pytest.raises(ValueError, match="names coingecko but has no gecko_id"):
+        _validate(
+            Asset(symbol="X", sector="defi", cm_id="x", metric_sources={"valuation": "coingecko"})
+        )
