@@ -273,13 +273,23 @@ def main(argv: list[str] | None = None) -> int:
             for name in names:
                 result = SOURCES[name].fetch(start, end, assets, client)
                 table, key = SILVER_TABLE[name], KEYS[name]
+                # Silver holds the quarantined (nulled) cell, so the fetch must be cleaned the
+                # same way or every quarantined cell reads as a revision forever. The log rows
+                # are discarded: reconcile is a read-only diagnostic.
+                fetched, _ = quarantine_impossible(
+                    result.frame,
+                    load_contract(SOURCES[name].contract_path),
+                    name,
+                    "reconcile",
+                    key,
+                )
                 print(
                     name,
                     reconcile_report(
                         _read_silver(settings, table),
-                        result.frame,
+                        fetched,
                         key,
-                        _value_cols(result.frame, key),
+                        _value_cols(fetched, key),
                     ),
                 )
                 for err in result.errors:

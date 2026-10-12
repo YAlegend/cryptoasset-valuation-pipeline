@@ -444,3 +444,49 @@ def test_ingest_quarantines_an_impossible_value_before_it_reaches_silver(tmp_pat
     )
     assert quarantine["raw_value"].iloc[0] == 8.02e52
     assert quarantine["column"].iloc[0] == "volume_reported_spot_usd_1d"
+
+
+def test_reconcile_does_not_report_a_quarantined_cell_as_a_revision(
+    tmp_path, monkeypatch, capsys
+):
+    """Silver stores the nulled cell; the fresh fetch still carries the impossible raw value.
+    Reconcile must clean the fetch the same way, or that cell reads as a revision on every
+    run and buries the real ones (spec 8.2). A genuine revision must still show."""
+    settings = Settings(data_root=str(tmp_path))
+    dates = pd.to_datetime(["2026-05-05", "2026-05-05"], utc=True)
+
+    def frame(btc_cap):
+        return pd.DataFrame(
+            {
+                "asset": ["usdc", "btc"],
+                "metric_date": dates,
+                "volume_reported_spot_usd_1d": [8.02e52, 2.9e9],
+                "CapMrktCurUSD": [7.52e10, btc_cap],
+            }
+        )
+
+    class Vendor:
+        name = "coinmetrics"
+        contract_path = "config/contracts/coinmetrics_asset_metrics.yml"
+        btc_cap = 1.6e12
+
+        def fetch(self, start, end, assets, client):
+            return FetchResult(frame(self.btc_cap), 2)
+
+    vendor = Vendor()
+    monkeypatch.setitem(cli.SOURCES, "coinmetrics", vendor)
+    monkeypatch.setattr(cli, "load_config", lambda: (settings, []))
+    cli.run_ingest(settings, [], ["coinmetrics"], dt.date(2026, 5, 5), dt.date(2026, 5, 5))
+
+    def reconcile_output():
+        argv = ["reconcile", "--sources", "coinmetrics", "--start", "2026-05-05"]
+        assert main([*argv, "--end", "2026-05-05"]) == 0
+        return capsys.readouterr().out
+
+    # Nothing revised: the quarantined usdc cell must not count as drift.
+    assert "'changed': 0" in reconcile_output()
+
+    # btc's market cap is genuinely revised; usdc's quarantined cell is still not a diff.
+    vendor.btc_cap = 1.7e12
+    assert "'changed': 1" in reconcile_output()
+    assert "'unchanged': 1" in reconcile_output()
