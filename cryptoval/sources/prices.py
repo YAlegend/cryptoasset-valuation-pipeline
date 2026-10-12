@@ -55,7 +55,7 @@ class CoinGeckoSource:
     name = "coingecko"
     contract_path = "config/contracts/coingecko_market_chart.yml"
 
-    def __init__(self, max_retries: int = 5, sleep_between_assets_s: float = 2.5) -> None:
+    def __init__(self, max_retries: int = 5, sleep_between_assets_s: float = 6.0) -> None:
         self.max_retries = max_retries
         self.sleep_between_assets_s = sleep_between_assets_s
 

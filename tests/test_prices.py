@@ -335,3 +335,10 @@ def test_a_complete_equity_fetch_reports_no_errors(monkeypatch):
         START, END, [_equity("AAPL", "AAPL"), _equity("SPY", "SPY")], client=None
     )
     assert result.errors == ()
+
+
+def test_default_pacing_is_six_seconds_between_assets():
+    # Measured 2026-10-12: three consecutive `make ingest` runs at the previous 2.5 s
+    # (~24 calls/min) all ended `status: partial` on HTTP 429, failing at assets 2, 21 and
+    # 21 of 24. The keyless tier no longer sustains that; 6.0 s is ~10 calls/min.
+    assert CoinGeckoSource().sleep_between_assets_s == 6.0
