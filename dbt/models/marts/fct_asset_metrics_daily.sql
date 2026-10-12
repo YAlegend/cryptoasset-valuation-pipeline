@@ -10,11 +10,11 @@ derived as (
         *,
         issuance_usd + (fees_native * price_usd)                    as miner_revenue_usd,
         sum(coalesce(issuance_usd + (fees_native * price_usd), 0)) over (
-            partition by asset order by metric_date
+            partition by symbol order by metric_date
             rows between unbounded preceding and current row
         )                                                           as thermocap_usd,
         coalesce(bool_or(issuance_usd is null or fees_native is null or price_usd is null) over (
-            partition by asset order by metric_date
+            partition by symbol order by metric_date
             rows between unbounded preceding and current row
         ), false)                                                   as thermocap_has_gap
     from base

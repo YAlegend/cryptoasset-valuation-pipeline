@@ -1,7 +1,7 @@
 PY := .venv/bin/python
 PIP := .venv/bin/pip
 
-.PHONY: setup test test-integration lint fmt ingest backfill validate reconcile dbt all
+.PHONY: setup test test-integration lint fmt ingest backfill validate reconcile seed dbt all
 
 setup:
 	python3 -m venv .venv
@@ -32,6 +32,9 @@ validate:
 
 reconcile:
 	$(PY) -m cryptoval.cli reconcile --start 2015-01-01
+
+seed:
+	$(PY) -I -c "from cryptoval.config import load_config; from cryptoval.seeds import write_asset_seeds; _, a = load_config(); print('\n'.join(write_asset_seeds(a, 'dbt/seeds')))"
 
 dbt:
 	cd dbt && ../.venv/bin/dbt build --profiles-dir .

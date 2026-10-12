@@ -6,9 +6,9 @@ models:
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
-            combination_of_columns: [asset, metric_date]
+            combination_of_columns: [symbol, metric_date]
     columns:
-      - name: asset
+      - name: symbol
         tests: [not_null]
       - name: metric_date
         tests: [not_null]
@@ -71,6 +71,40 @@ models:
         tests: [not_null]
 
   - name: dim_asset
+    description: >
+      One row per symbol in config/assets.yml, seeded rather than derived from the panel,
+      so an asset absent from every vendor feed (SOL on Coin Metrics) still exists here.
+      The density columns are NULL for an asset with no observations, which is deliberate:
+      no not_null test is placed on them.
     columns:
-      - name: asset
+      - name: symbol
         tests: [not_null, unique]
+
+  - name: stg_asset_metrics
+    description: Coin Metrics panel resolved from vendor ids to symbol, one join per metric group.
+    columns:
+      - name: symbol
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_asset')
+                field: symbol
+
+  - name: stg_market_chart
+    description: CoinGecko panel resolved to symbol via the gecko_id on the assets seed.
+    columns:
+      - name: symbol
+        tests: [not_null]
+
+  - name: stg_protocol_revenue
+    description: DefiLlama protocols rolled up to symbol across the configured slug list.
+    columns:
+      - name: symbol
+        tests: [not_null]
+
+  - name: stg_equity_prices
+    description: Equity and macro closes resolved to symbol via the yahoo_id on the assets seed.
+    columns:
+      - name: symbol
+        tests: [not_null]

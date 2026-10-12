@@ -16,3 +16,18 @@ models:
       +materialized: view
     marts:
       +materialized: table
+
+seeds:
+  cryptoval:
+    +schema: main
+    assets:
+      +column_types:
+        symbol: varchar
+        is_stablecoin: boolean
+        is_equity: boolean
+    asset_metric_sources:
+      +column_types:
+        symbol: varchar
+        metric_group: varchar
+        source_kind: varchar
+        source_id: varchar

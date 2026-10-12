@@ -103,3 +103,45 @@ def test_connect_rejects_remote_root_without_side_effects(tmp_path, monkeypatch,
     with pytest.raises(NotImplementedError):
         connect(PathResolver(root))
     assert list(tmp_path.iterdir()) == []
+
+
+def test_staging_resolves_vendor_ids_to_symbols(tmp_path):
+    """AVAX's two vendor series must recombine into one row per (symbol, date)."""
+    import duckdb
+
+    con = duckdb.connect()
+    con.execute(
+        """
+        create table panel as select * from (values
+            ('avaxc', date '2026-10-01', 1.0e9, 100.0, null),
+            ('avax',  date '2026-10-01', null,  null,  5.0e7)
+        ) as t(vendor_id, metric_date, market_cap_usd, active_addresses,
+               volume_reported_spot_usd)
+        """
+    )
+    con.execute(
+        """
+        create table sources as select * from (values
+            ('AVAX','network','avaxc'), ('AVAX','valuation','avaxc'), ('AVAX','volume','avax')
+        ) as t(symbol, metric_group, source_id)
+        """
+    )
+    out = con.execute(
+        """
+        with network as (
+            select s.symbol, p.metric_date, p.active_addresses from panel p
+            join sources s on p.vendor_id = s.source_id and s.metric_group='network'),
+        valuation as (
+            select s.symbol, p.metric_date, p.market_cap_usd from panel p
+            join sources s on p.vendor_id = s.source_id and s.metric_group='valuation'),
+        volume as (
+            select s.symbol, p.metric_date, p.volume_reported_spot_usd from panel p
+            join sources s on p.vendor_id = s.source_id and s.metric_group='volume')
+        select n.symbol, n.active_addresses, v.market_cap_usd, vol.volume_reported_spot_usd
+        from network n
+        join valuation v on n.symbol=v.symbol and n.metric_date=v.metric_date
+        join volume vol on n.symbol=vol.symbol and n.metric_date=vol.metric_date
+        """
+    ).fetchall()
+    # One row, carrying the network metrics from avaxc AND the volume from avax.
+    assert out == [("AVAX", 100.0, 1.0e9, 5.0e7)]
