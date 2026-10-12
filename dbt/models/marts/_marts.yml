@@ -5,6 +5,8 @@ models:
     description: >
       Conformed daily asset panel at grain (symbol, metric_date): Coin Metrics network and
       valuation metrics joined to CoinGecko's panel, with derived cost-approach metrics.
+      The spine is the union of both vendors' symbol-days, so an asset Coin Metrics does not
+      serve (SOL) still has rows, with every Coin Metrics column NULL.
       Two columns are resolved across vendors and one deliberately is not. price_usd is
       coalesced (Coin Metrics, else CoinGecko) because it is the same quantity measured by
       two vendors to within a fraction of a percent. Market cap is resolved too, with
@@ -26,7 +28,7 @@ models:
       - name: market_cap_usd
         description: >
           Resolved across vendors; market_cap_source says which. NULL where Coin Metrics
-          publishes no market cap and the asset is not routed to CoinGecko (6,890 rows
+          publishes no market cap and the asset is not routed to CoinGecko (6,905 rows
           on 2026-10-12, mostly BNB, DOT and MKR). The not_null test is therefore a WARNING,
           not an error: a genuine market-cap outage shows up as a rising warn count,
           while the blocking tripwires are the range bound and the identity checks.

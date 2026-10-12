@@ -8,7 +8,8 @@ select
     m.market_cap_usd   as cg_market_cap_usd,
     m.volume_usd       as cg_volume_total_usd,
     m.velocity         as cg_velocity,
-    m.holding_time_days as cg_holding_time_days
+    m.holding_time_days as cg_holding_time_days,
+    m.effective_start_ts as cg_effective_start_ts
 from read_parquet('{{ var("data_root") }}/silver/market_chart/*.parquet') m
 join {{ ref('assets') }} a on m.asset = a.gecko_id
 where m.is_current

@@ -11,21 +11,34 @@
 --
 -- A NULL input day contributes 0 to thermocap (so the series stays usable as a lower
 -- bound) and raises thermocap_has_gap from that row onward.
-with base as (
+with spine as (
+    -- Symbol-days from EITHER vendor. A Coin Metrics-driven spine would make a CoinGecko-only
+    -- asset (SOL has no free Coin Metrics series at all) structurally invisible while its
+    -- price and market cap sit one model away. Coin Metrics columns stay NULL on such rows.
+    select symbol, metric_date from {{ ref('stg_asset_metrics') }}
+    union
+    select symbol, metric_date from {{ ref('stg_market_chart') }}
+),
+base as (
     select
-        m.*,
+        sp.symbol,
+        sp.metric_date,
+        m.* exclude (symbol, metric_date),
         c.cg_price_usd,
         c.cg_market_cap_usd,
         c.cg_volume_total_usd,
+        c.cg_effective_start_ts,
         v.source_kind as valuation_source_kind
-    from {{ ref('stg_asset_metrics') }} m
+    from spine sp
+    left join {{ ref('stg_asset_metrics') }} m
+           on sp.symbol = m.symbol and sp.metric_date = m.metric_date
     left join {{ ref('stg_market_chart') }} c
-           on m.symbol = c.symbol and m.metric_date = c.metric_date
+           on sp.symbol = c.symbol and sp.metric_date = c.metric_date
     left join (
         select symbol, source_kind
         from {{ ref('asset_metric_sources') }}
         where metric_group = 'valuation'
-    ) v on m.symbol = v.symbol
+    ) v on sp.symbol = v.symbol
 ),
 resolved as (
     select
@@ -90,5 +103,8 @@ select
     -- be traceable to the panel state that produced it. effective_end_ts is deliberately
     -- absent: this is a current-state grain built downstream of an is_current filter, where
     -- it would always be the open sentinel. Bi-temporal reconstruction belongs in silver.
-    effective_start_ts                                               as panel_vintage_ts
+    -- The latest vintage among every contributing group: the Coin Metrics groups (already
+    -- folded into effective_start_ts by stg_asset_metrics) and CoinGecko. A CoinGecko-only
+    -- row has no Coin Metrics vintage, and greatest() skips the NULL.
+    greatest(effective_start_ts, cg_effective_start_ts)              as panel_vintage_ts
 from derived

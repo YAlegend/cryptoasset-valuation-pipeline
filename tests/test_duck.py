@@ -309,6 +309,9 @@ def test_fct_asset_metrics_daily_sql_keeps_volumes_apart_and_records_the_market_
         """
     )
     con.execute(
+        "alter table stg_market_chart add column cg_effective_start_ts timestamptz"
+    )
+    con.execute(
         """
         create table asset_metric_sources as select * from (values
             ('BTC','valuation','cm','btc'), ('TRX','valuation','coingecko','tron')
@@ -342,3 +345,59 @@ def test_fct_asset_metrics_daily_sql_keeps_volumes_apart_and_records_the_market_
     # Where CoinGecko has none either, the source is NULL too, and so are the velocities.
     assert rows[("TRX", "2026-10-11")][:2] == (None, None)
     assert rows[("TRX", "2026-10-11")][4:6] == (None, None)
+
+
+def test_a_coingecko_only_symbol_day_gets_a_row_with_its_own_provenance():
+    """SOL has no Coin Metrics series: its fact rows exist only through CoinGecko staging.
+
+    The spine is the union of both vendors' symbol-days, so the asset is not structurally
+    invisible. Everything Coin Metrics-derived stays NULL, the market cap is CoinGecko's and
+    says so, velocity_total is computable, and velocity_reported must NOT borrow CoinGecko's
+    volume. panel_vintage_ts takes in the CoinGecko group so the row is still traceable.
+    """
+    import datetime
+
+    import duckdb
+
+    sql = _model_sql("fct_asset_metrics_daily", "marts")
+    con = duckdb.connect()
+    con.execute(
+        """
+        create table stg_asset_metrics (
+            symbol varchar, metric_date date, market_cap_usd double, mvrv double,
+            realized_cap double, price_usd double, supply double, hash_rate double,
+            issuance_usd double, fees_native double, active_addresses double, tx_count double,
+            volume_reported_spot_usd double, effective_start_ts timestamptz, row_hash varchar
+        )
+        """
+    )
+    con.execute(
+        """
+        create table stg_market_chart as select * from (values
+            ('SOL', date '2026-10-10', 150.0, 8.0e10, 4.0e9, timestamptz '2026-10-11 00:00:00+00')
+        ) as t(symbol, metric_date, cg_price_usd, cg_market_cap_usd, cg_volume_total_usd,
+               cg_effective_start_ts)
+        """
+    )
+    con.execute(
+        """
+        create table asset_metric_sources as select * from (values
+            ('SOL','valuation','coingecko','solana')
+        ) as t(symbol, metric_group, source_kind, source_id)
+        """
+    )
+    rows = con.execute(
+        f"""
+        select symbol, metric_date, market_cap_usd, market_cap_source, price_usd,
+               volume_reported_spot_usd, volume_total_usd, velocity_reported, velocity_total,
+               mvrv, realized_cap, supply, panel_vintage_ts at time zone 'UTC'
+        from ({sql})
+        """
+    ).fetchall()
+    assert rows == [
+        (
+            "SOL", datetime.date(2026, 10, 10), 8.0e10, "coingecko", 150.0,
+            None, 4.0e9, None, 4.0e9 / 8.0e10,
+            None, None, None, datetime.datetime(2026, 10, 11),
+        )
+    ]
