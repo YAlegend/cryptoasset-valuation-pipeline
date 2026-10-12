@@ -36,10 +36,10 @@ print('largest credible value:', cur.loc[cur['v'] <= 1e12, 'v'].max())
    gate green, and do NOT overwrite the value with an interpolation — an
    invented number in the panel is worse than a known hole.
 3. The SCD2 history keeps every vintage, so the exclusion is reversible from
-   silver. Bronze is NOT a second copy for this purpose: a partition is keyed by
-   `ingest_date` and a rewrite on the same date replaces it wholesale
-   (`test_rewriting_a_date_replaces_the_partition_wholesale`), so re-fetching the
-   named asset-days today overwrites today's raw response record.
+   silver. Bronze is also a genuine second copy: every run lands in its own
+   `run_id=` partition and a collision is refused rather than overwritten
+   (`test_two_runs_on_the_same_date_both_survive`), so re-fetching the named
+   asset-days today leaves today's earlier raw response record intact.
 
 **Do not confuse this with the volume-anomaly WARNINGS.** Those are ratio
 deviations from the mean of the previous 30 observations (30 days on a dense

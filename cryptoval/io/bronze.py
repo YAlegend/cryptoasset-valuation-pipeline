@@ -52,7 +52,9 @@ def write_bronze(
         # A run_id is unique per run, so this is a bug rather than an intentional rewrite.
         # Bronze is append-only: nothing here deletes.
         raise FileExistsError(f"bronze partition already exists for run {run_id}: {final}")
-    staging = final.with_name(final.name + ".tmp")
+    # The name must not begin with "run_id=": read_bronze globs that prefix, and a staging
+    # directory already holds data.parquet before the rename, so it would look like a run.
+    staging = final.with_name(".staging-" + final.name)
     if staging.exists():
         shutil.rmtree(staging)
     staging.mkdir(parents=True)

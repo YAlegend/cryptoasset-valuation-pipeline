@@ -80,7 +80,28 @@ def test_rewriting_the_same_run_id_is_refused(tmp_path):
         )
     # Refused means untouched: the original response is still there, and no staging is left.
     assert read_bronze(r, "coinmetrics", dt.date(2026, 10, 12), "run-1")["v"].iloc[0] == 1.0
-    assert [p.name for p in pathlib.Path(tmp_path).rglob("*.tmp*")] == []
+    assert [p.name for p in pathlib.Path(tmp_path).rglob("*staging*")] == []
+
+
+def test_read_bronze_never_returns_a_run_that_is_still_being_written(tmp_path, monkeypatch):
+    """Staging holds a data.parquet before the rename; it must not look like a finished run."""
+    r = PathResolver(str(tmp_path))
+    write_bronze(r, "s", DAY, pd.DataFrame({"v": [1.0]}), {}, "run-1")
+
+    seen = {}
+    real_to_parquet = pd.DataFrame.to_parquet
+
+    def read_while_in_flight(self, *args, **kwargs):
+        real_to_parquet(self, *args, **kwargs)
+        # data.parquet now exists inside staging and the rename has not happened yet.
+        seen["v"] = read_bronze(r, "s", DAY)["v"].iloc[0]
+
+    monkeypatch.setattr(pd.DataFrame, "to_parquet", read_while_in_flight)
+    write_bronze(r, "s", DAY, pd.DataFrame({"v": [9.0]}), {}, "run-2")
+
+    assert seen["v"] == 1.0
+    monkeypatch.undo()
+    assert read_bronze(r, "s", DAY)["v"].iloc[0] == 9.0
 
 
 def test_reading_a_date_with_no_runs_raises(tmp_path):
@@ -116,7 +137,7 @@ def test_empty_frame_is_rejected_so_a_failed_fetch_cannot_look_complete(tmp_path
 def test_no_temporary_directory_is_left_behind(tmp_path):
     r = PathResolver(str(tmp_path))
     write_bronze(r, "s", DAY, _df(), {}, "run-1")
-    leftovers = [p.name for p in pathlib.Path(tmp_path).rglob("*.tmp*")]
+    leftovers = [p.name for p in pathlib.Path(tmp_path).rglob("*staging*")]
     assert leftovers == []
 
 
@@ -139,7 +160,7 @@ def test_failed_later_run_keeps_the_previous_run_and_leaves_no_temporary(tmp_pat
 
     back = read_bronze(r, "s", DAY)
     assert back.loc[0, "asset"] == "btc"
-    leftovers = [p.name for p in pathlib.Path(tmp_path).rglob("*.tmp*")]
+    leftovers = [p.name for p in pathlib.Path(tmp_path).rglob("*staging*")]
     assert leftovers == []
 
 
@@ -156,5 +177,5 @@ def test_failed_first_write_leaves_no_partition(tmp_path, monkeypatch):
     assert not pathlib.Path(r.bronze_partition("s", DAY, "run-1")).exists()
     with pytest.raises(FileNotFoundError):
         read_bronze(r, "s", DAY)
-    leftovers = [p.name for p in pathlib.Path(tmp_path).rglob("*.tmp*")]
+    leftovers = [p.name for p in pathlib.Path(tmp_path).rglob("*staging*")]
     assert leftovers == []
