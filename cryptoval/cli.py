@@ -109,7 +109,7 @@ def run_ingest(
                 if result.frame.empty:
                     raise RuntimeError("source returned no rows")
 
-                write_bronze(settings.resolver, name, end, result.frame, params)
+                write_bronze(settings.resolver, name, end, result.frame, params, record.run_id)
 
                 table, key = SILVER_TABLE[name], KEYS[name]
                 # After bronze (which keeps what the vendor sent) and before the merge (so the

@@ -4,6 +4,9 @@ Writes are atomic: data lands in a sibling temporary directory and is only
 renamed into place once the whole frame is written. A fetch that dies
 half-way therefore leaves no partition at all, rather than a partial one
 that later runs would mistake for complete (Review Focus 5).
+
+Each run lands in its own ``run_id=`` partition and a collision is refused, never
+overwritten: bronze is append-only.
 """
 
 from __future__ import annotations
@@ -25,6 +28,7 @@ def write_bronze(
     ingest_date: dt.date,
     df: pd.DataFrame,
     request_params: dict,
+    run_id: str,
 ) -> str:
     if resolver.is_remote:
         raise NotImplementedError(
@@ -41,28 +45,48 @@ def write_bronze(
     enriched["_fetched_at"] = pd.Timestamp.now(tz="UTC")
     enriched["_source"] = source
     enriched["_request_hash"] = stable_hash(request_params)
+    enriched["_run_id"] = run_id
 
-    final = pathlib.Path(resolver.bronze_partition(source, ingest_date))
+    final = pathlib.Path(resolver.bronze_partition(source, ingest_date, run_id))
+    if final.exists():
+        # A run_id is unique per run, so this is a bug rather than an intentional rewrite.
+        # Bronze is append-only: nothing here deletes.
+        raise FileExistsError(f"bronze partition already exists for run {run_id}: {final}")
     staging = final.with_name(final.name + ".tmp")
     if staging.exists():
         shutil.rmtree(staging)
     staging.mkdir(parents=True)
     try:
         enriched.to_parquet(staging / "data.parquet", index=False)
-        if final.exists():
-            shutil.rmtree(final)
         staging.rename(final)
     finally:
         # On success the rename has already moved staging away; on failure this removes it.
+        # Only staging is ever cleaned up: a finished partition is never deleted.
         shutil.rmtree(staging, ignore_errors=True)
     return str(final)
 
 
-def read_bronze(resolver: PathResolver, source: str, ingest_date: dt.date) -> pd.DataFrame:
-    path = pathlib.Path(resolver.bronze_partition(source, ingest_date)) / "data.parquet"
-    if not path.exists():
-        raise FileNotFoundError(f"no bronze partition at {path}")
-    return pd.read_parquet(path)
+def read_bronze(
+    resolver: PathResolver,
+    source: str,
+    ingest_date: dt.date,
+    run_id: str | None = None,
+) -> pd.DataFrame:
+    """Read one run's partition, defaulting to the newest run for that date."""
+    if run_id is not None:
+        path = pathlib.Path(resolver.bronze_partition(source, ingest_date, run_id)) / "data.parquet"
+        if not path.exists():
+            raise FileNotFoundError(f"no bronze partition at {path}")
+        return pd.read_parquet(path)
+
+    prefix = pathlib.Path(resolver.bronze_date_prefix(source, ingest_date))
+    runs = sorted(
+        (p for p in prefix.glob("run_id=*") if (p / "data.parquet").exists()),
+        key=lambda p: (p / "data.parquet").stat().st_mtime,
+    )
+    if not runs:
+        raise FileNotFoundError(f"no bronze runs under {prefix}")
+    return pd.read_parquet(runs[-1] / "data.parquet")
 
 
 def write_silver(resolver: PathResolver, table: str, df: pd.DataFrame) -> str:

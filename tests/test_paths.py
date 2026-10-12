@@ -25,10 +25,24 @@ def test_local_root_is_not_remote():
     assert PathResolver("./data").is_remote is False
 
 
-def test_bronze_partition_layout_is_hive_style():
-    r = PathResolver("./data")
-    got = r.bronze_partition("coinmetrics", dt.date(2026, 10, 11))
-    assert got == "./data/bronze/source=coinmetrics/ingest_date=2026-10-11"
+def test_bronze_partition_includes_the_run_id():
+    r = PathResolver("/data")
+    assert r.bronze_partition("coinmetrics", dt.date(2026, 10, 12), "run-abc") == (
+        "/data/bronze/source=coinmetrics/ingest_date=2026-10-12/run_id=run-abc"
+    )
+
+
+def test_bronze_date_prefix_holds_every_run_for_that_date():
+    r = PathResolver("/data")
+    assert r.bronze_date_prefix("coinmetrics", dt.date(2026, 10, 12)) == (
+        "/data/bronze/source=coinmetrics/ingest_date=2026-10-12"
+    )
+
+
+@pytest.mark.parametrize("bad", ["", "   ", None])
+def test_bronze_partition_rejects_an_empty_run_id(bad):
+    with pytest.raises(ValueError, match="run_id"):
+        PathResolver("/data").bronze_partition("coinmetrics", dt.date(2026, 10, 12), bad)
 
 
 def test_table_path():
