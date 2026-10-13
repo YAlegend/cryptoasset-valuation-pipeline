@@ -118,3 +118,16 @@ def test_the_committed_method_seed_matches_what_config_generates(tmp_path):
     repo = pathlib.Path(__file__).parent.parent
     committed = repo / "dbt" / "seeds" / fresh.name
     assert committed.read_text(encoding="utf-8") == fresh.read_text(encoding="utf-8")
+
+
+def test_genesis_date_reaches_the_asset_seed_and_is_blank_when_unknown(tmp_path):
+    import datetime as dt
+
+    assets = [
+        Asset(symbol="BTC", sector="pow_monetary", consensus="pow", cm_id="btc",
+              genesis_date=dt.date(2009, 1, 3)),
+        Asset(symbol="BNB", sector="exchange", consensus="other", cm_id="bnb"),
+    ]
+    rows = {r["symbol"]: r for r in _rows(write_asset_seeds(assets, str(tmp_path))[0])}
+    assert rows["BTC"]["genesis_date"] == "2009-01-03"
+    assert rows["BNB"]["genesis_date"] == ""

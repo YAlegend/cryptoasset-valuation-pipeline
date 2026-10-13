@@ -25,6 +25,7 @@ ASSET_COLUMNS = [
     "yahoo_id",
     "defillama_slugs",
     "coverage_note",
+    "genesis_date",
 ]
 SOURCE_COLUMNS = ["symbol", "metric_group", "source_kind", "source_id"]
 METHOD_COLUMNS = [
@@ -63,6 +64,7 @@ def write_asset_seeds(assets: list[Asset], seed_dir: str) -> list[str]:
             # Pipe-delimited: these are CSVs and the slugs contain spaces but never pipes.
             "defillama_slugs": "|".join(a.defillama_slugs),
             "coverage_note": a.coverage_note,
+            "genesis_date": a.genesis_date.isoformat() if a.genesis_date else "",
         }
         for a in assets
     ]

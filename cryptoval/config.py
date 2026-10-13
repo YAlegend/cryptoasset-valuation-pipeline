@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import os
 import pathlib
 import re
@@ -45,6 +46,9 @@ class Asset:
     metric_sources: dict[str, str] = field(default_factory=dict)
     defillama_slugs: tuple[str, ...] = ()
     coverage_note: str = ""
+    # The asset's real launch, a matter of record; absent when it is not. The power law
+    # refuses an asset without one rather than borrowing the vendor's coverage start.
+    genesis_date: dt.date | None = None
 
     def source_for(self, group: str) -> str:
         if group not in METRIC_GROUPS:
@@ -96,6 +100,14 @@ def _validate(asset: Asset) -> None:
             )
         if source == "coingecko" and not asset.gecko_id:
             raise ValueError(f"{asset.symbol}: group {group!r} names coingecko but has no gecko_id")
+    if asset.genesis_date is not None and (
+        not isinstance(asset.genesis_date, dt.date) or isinstance(asset.genesis_date, dt.datetime)
+    ):
+        # YAML itself rejects an impossible date like 2009-13-45; a non-date string or a
+        # timestamp would parse and reach the power law as garbage instead of failing here.
+        raise ValueError(
+            f"{asset.symbol}: genesis_date must be a YYYY-MM-DD date, got {asset.genesis_date!r}"
+        )
     if any(not str(slug).strip() for slug in asset.defillama_slugs):
         raise ValueError(f"{asset.symbol}: defillama_slugs contains an empty entry")
     if not asset.cm_id and not asset.gecko_id:

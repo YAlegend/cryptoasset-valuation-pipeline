@@ -1,32 +1,32 @@
-symbol,sector,consensus,is_stablecoin,is_equity,cm_id,gecko_id,yahoo_id,defillama_slugs,coverage_note
-BTC,pow_monetary,pow,false,false,btc,bitcoin,,,
-LTC,pow_monetary,pow,false,false,ltc,litecoin,,,
-BCH,pow_monetary,pow,false,false,bch,bitcoin-cash,,,
-DOGE,pow_monetary,pow,false,false,doge,dogecoin,,,
-ETH,smart_contract_l1,pos,false,false,eth,ethereum,,Ethereum,
-ADA,smart_contract_l1,pos,false,false,ada,cardano,,,
-DOT,smart_contract_l1,pos,false,false,dot,polkadot,,,
-AVAX,smart_contract_l1,pos,false,false,avaxc,avalanche-2,,,avaxc is the C-Chain and serves no reported spot volume; volume comes from cm:avax (spec 5.1)
-ALGO,smart_contract_l1,pos,false,false,algo,algorand,,,
-TRX,smart_contract_l1,pos,false,false,trx,tron,,,"cm:trx is real TRON but has no free market cap, MVRV or supply, so the cost family does not apply; trx_eth was a near-dead ERC-20 wrapper (spec 5.1)"
-ICP,smart_contract_l1,pos,false,false,icp,internet-computer,,,
-POL,scaling,pos,false,false,pol_eth,polygon-ecosystem-token,,,"history starts 2023-10-25; the pre-rebrand MATIC series returns no data on the free tier, so no splice is possible (spec 5)"
-UNI,defi,other,false,false,uni,uniswap,,Uniswap V4|Uniswap V3|Uniswap V2,
-AAVE,defi,other,false,false,aave,aave,,Aave V4|Aave V3|Aave V2,
-CRV,defi,other,false,false,crv,curve-dao-token,,Curve DEX|Curve LlamaLend V2,
-MKR,defi,other,false,false,mkr,maker,,Sky Lending|Sky Money,rebranded: no protocol named Maker exists in the feed as of 2026-10-12
-COMP,defi,other,false,false,comp,compound-governance-token,,Compound V3|Compound V2,
-SNX,defi,other,false,false,snx,havven,,Synthetix V4|Synthetix V3|Synthetix v1+v2,
-LDO,defi,other,false,false,ldo,lido-dao,,Lido,
-LINK,oracle,other,false,false,link,chainlink,,Chainlink Requests|Chainlink Staking,
-BNB,exchange,other,false,false,bnb,binancecoin,,,"market cap, MVRV and supply begin 2019-04-22 and are only 19% dense; density is a method precondition (spec 5)"
-MANA,metaverse,other,false,false,mana,decentraland,,,
-USDC,stablecoin,na,true,false,usdc,usd-coin,,,
-SOL,smart_contract_l1,pos,false,false,,solana,,,absent from the Coin Metrics free tier (CapMrktCurUSD returns 403); CoinGecko price and market cap only (spec 5)
-TSLA,,na,false,true,,,TSLA,,
-AAPL,,na,false,true,,,AAPL,,
-AMZN,,na,false,true,,,AMZN,,
-GOOGL,,na,false,true,,,GOOGL,,
-META,,na,false,true,,,META,,
-GOLD,,na,false,true,,,GC=F,,
-DXY,,na,false,true,,,DX-Y.NYB,,
+symbol,sector,consensus,is_stablecoin,is_equity,cm_id,gecko_id,yahoo_id,defillama_slugs,coverage_note,genesis_date
+BTC,pow_monetary,pow,false,false,btc,bitcoin,,,,2009-01-03
+LTC,pow_monetary,pow,false,false,ltc,litecoin,,,,2011-10-07
+BCH,pow_monetary,pow,false,false,bch,bitcoin-cash,,,,2017-08-01
+DOGE,pow_monetary,pow,false,false,doge,dogecoin,,,,2013-12-06
+ETH,smart_contract_l1,pos,false,false,eth,ethereum,,Ethereum,,2015-07-30
+ADA,smart_contract_l1,pos,false,false,ada,cardano,,,,2017-09-29
+DOT,smart_contract_l1,pos,false,false,dot,polkadot,,,,2020-05-26
+AVAX,smart_contract_l1,pos,false,false,avaxc,avalanche-2,,,avaxc is the C-Chain and serves no reported spot volume; volume comes from cm:avax (spec 5.1),2020-09-21
+ALGO,smart_contract_l1,pos,false,false,algo,algorand,,,,
+TRX,smart_contract_l1,pos,false,false,trx,tron,,,"cm:trx is real TRON but has no free market cap, MVRV or supply, so the cost family does not apply; trx_eth was a near-dead ERC-20 wrapper (spec 5.1)",
+ICP,smart_contract_l1,pos,false,false,icp,internet-computer,,,,2021-05-10
+POL,scaling,pos,false,false,pol_eth,polygon-ecosystem-token,,,"history starts 2023-10-25; the pre-rebrand MATIC series returns no data on the free tier, so no splice is possible (spec 5)",
+UNI,defi,other,false,false,uni,uniswap,,Uniswap V4|Uniswap V3|Uniswap V2,,2020-09-17
+AAVE,defi,other,false,false,aave,aave,,Aave V4|Aave V3|Aave V2,,
+CRV,defi,other,false,false,crv,curve-dao-token,,Curve DEX|Curve LlamaLend V2,,2020-08-13
+MKR,defi,other,false,false,mkr,maker,,Sky Lending|Sky Money,rebranded: no protocol named Maker exists in the feed as of 2026-10-12,
+COMP,defi,other,false,false,comp,compound-governance-token,,Compound V3|Compound V2,,2020-06-15
+SNX,defi,other,false,false,snx,havven,,Synthetix V4|Synthetix V3|Synthetix v1+v2,,
+LDO,defi,other,false,false,ldo,lido-dao,,Lido,,
+LINK,oracle,other,false,false,link,chainlink,,Chainlink Requests|Chainlink Staking,,
+BNB,exchange,other,false,false,bnb,binancecoin,,,"market cap, MVRV and supply begin 2019-04-22 and are only 19% dense; density is a method precondition (spec 5)",
+MANA,metaverse,other,false,false,mana,decentraland,,,,
+USDC,stablecoin,na,true,false,usdc,usd-coin,,,,2018-09-26
+SOL,smart_contract_l1,pos,false,false,,solana,,,absent from the Coin Metrics free tier (CapMrktCurUSD returns 403); CoinGecko price and market cap only (spec 5),2020-03-16
+TSLA,,na,false,true,,,TSLA,,,
+AAPL,,na,false,true,,,AAPL,,,
+AMZN,,na,false,true,,,AMZN,,,
+GOOGL,,na,false,true,,,GOOGL,,,
+META,,na,false,true,,,META,,,
+GOLD,,na,false,true,,,GC=F,,,
+DXY,,na,false,true,,,DX-Y.NYB,,,

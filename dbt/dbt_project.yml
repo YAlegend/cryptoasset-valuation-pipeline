@@ -25,6 +25,7 @@ seeds:
         symbol: varchar
         is_stablecoin: boolean
         is_equity: boolean
+        genesis_date: date
     asset_metric_sources:
       +column_types:
         symbol: varchar

@@ -47,7 +47,8 @@ def test_the_hand_written_sections_live_in_config_so_regeneration_cannot_destroy
 
 def test_every_registered_method_has_a_config_and_vice_versa():
     """A method with no config cannot be run; a config with no method is a dead card."""
-    import cryptoval.methods.cost  # noqa: F401  -- import registers the families
+    import cryptoval.methods.benchmarks  # noqa: F401  -- import registers the families
+    import cryptoval.methods.cost  # noqa: F401
     import cryptoval.methods.monetary  # noqa: F401
     import cryptoval.methods.multiples  # noqa: F401
     import cryptoval.methods.network  # noqa: F401

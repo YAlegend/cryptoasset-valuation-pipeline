@@ -1,0 +1,20 @@
+method_id: power_law
+family: F_shelf
+requires: [price_usd, genesis_date]
+min_density: 0.9
+min_rows: 730
+params: {min_fit_rows: 365}
+citation: "Santostasi power law; contested - see the 2026 nine-objections paper (spec 10.7)"
+
+failure_modes:
+- 'Published here AS CONTESTED (spec 10.7), not as a model: the claimed mechanistic derivation has
+  nine documented methodological objections against it, and the fit is to time alone.'
+- 'Regressing log price on log days since genesis fits ANY long-lived appreciating asset: the
+  explanatory variable is the calendar, so the fit cannot fail for a reason that is about the asset.'
+- An asset without a configured genesis date is refused rather than given the panel's first
+  observation, which would be the vendor's coverage start, not the asset's birth.
+- The residuals are strongly autocorrelated by construction, so the confidence interval on beta is
+  optimistic.
+assumptions:
+- A configured genesis date exists for the asset and is its real launch.
+- Time since genesis is the explanatory variable, which is the objection as much as the model.

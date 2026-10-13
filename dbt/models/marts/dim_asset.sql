@@ -27,6 +27,7 @@ select
     a.yahoo_id,
     a.defillama_slugs,
     a.coverage_note,
+    a.genesis_date,
     o.first_observed_on,
     o.last_observed_on,
     coalesce(o.observation_days, 0) as observation_days,

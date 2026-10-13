@@ -151,3 +151,28 @@ def test_a_list_of_slugs_is_still_accepted(tmp_path):
 def test_an_empty_slug_is_rejected():
     with pytest.raises(ValueError, match="empty entry"):
         _validate(Asset(symbol="X", sector="defi", cm_id="x", defillama_slugs=("Lido", "  ")))
+
+
+def _load_one(tmp_path, genesis: str):
+    (tmp_path / "settings.yml").write_text("data_root: ./data\n")
+    (tmp_path / "assets.yml").write_text(
+        "assets:\n  - {symbol: X, cm_id: x, gecko_id: x, sector: defi, consensus: other, "
+        f"genesis_date: {genesis}}}\n"
+    )
+    return load_config(str(tmp_path))[1][0]
+
+
+def test_genesis_date_loads_as_a_date_and_btc_has_one():
+    import datetime as dt
+
+    btc = next(a for a in load_config()[1] if a.symbol == "BTC")
+    assert btc.genesis_date == dt.date(2009, 1, 3)
+    # Absent where the launch is not a matter of record, so the power law refuses it.
+    assert next(a for a in load_config()[1] if a.symbol == "BNB").genesis_date is None
+
+
+# 2009-13-45 is rejected by the YAML parser itself, the other two by _validate.
+@pytest.mark.parametrize("bad", ["2009-13-45", "not-a-date", "2009-01-03T10:00:00"])
+def test_a_malformed_genesis_date_fails_config_load(tmp_path, bad):
+    with pytest.raises(ValueError, match="genesis_date|month"):
+        _load_one(tmp_path, bad)
