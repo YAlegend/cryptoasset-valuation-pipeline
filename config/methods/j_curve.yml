@@ -1,0 +1,9 @@
+method_id: j_curve
+family: A_monetary
+requires: [volume_total_usd, supply, price_usd]
+min_density: 0.6
+min_rows: 180
+params:
+  velocity_source: parameter
+  velocity_daily: 0.04
+citation: "Burniske (2017), crypto J-curve; dissertation section 3.2"

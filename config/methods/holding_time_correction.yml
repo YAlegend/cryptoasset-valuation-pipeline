@@ -1,0 +1,8 @@
+method_id: holding_time_correction
+family: A_monetary
+requires: [velocity_total]
+min_density: 0.6
+min_rows: 365
+params: {window_rows: 365}
+returns_fair_value: false
+citation: "Kampakis et al. (2024); corrects dissertation sections 3.1 and 3.6"

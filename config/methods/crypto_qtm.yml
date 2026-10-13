@@ -1,0 +1,11 @@
+# Velocity as an exogenous assumption, so NOT circular.
+method_id: crypto_qtm
+family: A_monetary
+requires: [volume_total_usd, supply, price_usd]
+min_density: 0.6
+min_rows: 180
+params:
+  velocity_source: parameter
+  velocity_daily: 0.04        # ~14.6 turns a year; vary it, that is the point
+  circulating_fraction: 1.0   # SplyCur is already the circulating supply
+citation: "dissertation section 3.1, crypto quantity theory of money"

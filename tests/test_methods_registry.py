@@ -155,14 +155,24 @@ def test_method_specs_load_from_yaml():
     assert spec.citation
 
 
-def test_no_method_param_loads_as_a_string_instead_of_a_number():
+def test_no_numeric_method_param_loads_as_a_string():
     """YAML 1.1 needs a SIGNED exponent: `1.0e12` loads as the str "1.0e12", `1.0e+12`
     as a float. HayesCostOfProduction calls float() on its params and so survived it,
     but hayes_cost_per_coin called directly raised TypeError on the string -- a
-    parameter that works down one code path and breaks down another."""
+    parameter that works down one code path and breaks down another.
+
+    A string param is fine when it is genuinely a word (velocity_source: panel). What
+    must never happen is a NUMBER arriving as a string.
+    """
     for method_id, spec in load_method_specs().items():
         for name, value in spec.params.items():
-            assert not isinstance(value, str), (
-                f"{method_id}.{name} is the string {value!r}; write a signed exponent "
-                f"(1.0e+12, not 1.0e12) so YAML parses it as a number"
+            if not isinstance(value, str):
+                continue
+            try:
+                float(value)
+            except ValueError:
+                continue  # a genuine word, e.g. velocity_source: panel
+            raise AssertionError(
+                f"{method_id}.{name} is the string {value!r} but reads as a number; write a "
+                f"signed exponent (1.0e+12, not 1.0e12) so YAML parses it as one"
             )

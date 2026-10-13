@@ -1,0 +1,11 @@
+# The dissertation's own reading, circular by construction: velocity_total is
+# volume/market_cap, so the expression collapses to price/circulating_fraction.
+method_id: crypto_qtm_panel_velocity
+family: A_monetary
+requires: [volume_total_usd, supply, price_usd, velocity_total]
+min_density: 0.6
+min_rows: 180
+params:
+  velocity_source: panel
+  circulating_fraction: 1.0
+citation: "dissertation section 3.1 as literally specified; retained to measure the circularity"
