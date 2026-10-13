@@ -12,6 +12,7 @@ import csv
 import pathlib
 
 from cryptoval.config import METRIC_GROUPS, Asset
+from cryptoval.methods.base import MethodSpec
 
 ASSET_COLUMNS = [
     "symbol",
@@ -26,6 +27,15 @@ ASSET_COLUMNS = [
     "coverage_note",
 ]
 SOURCE_COLUMNS = ["symbol", "metric_group", "source_kind", "source_id"]
+METHOD_COLUMNS = [
+    "method_id",
+    "family",
+    "requires",
+    "min_density",
+    "min_rows",
+    "citation",
+    "returns_fair_value",
+]
 
 
 def _write(path: pathlib.Path, columns: list[str], rows: list[dict]) -> str:
@@ -90,3 +100,27 @@ def write_asset_seeds(assets: list[Asset], seed_dir: str) -> list[str]:
         _write(out / "assets.csv", ASSET_COLUMNS, asset_rows),
         _write(out / "asset_metric_sources.csv", SOURCE_COLUMNS, source_rows),
     ]
+
+
+def write_method_seed(specs: dict[str, MethodSpec], seed_dir: str) -> str:
+    """dim_method's source, projected from config/methods/ the way assets.csv is from config.
+
+    Sorted by method_id so the committed file does not churn on dict ordering.
+    """
+    out = pathlib.Path(seed_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    rows = [
+        {
+            "method_id": spec.method_id,
+            "family": spec.family,
+            # Pipe-delimited for the same reason as defillama_slugs: a CSV field holding a
+            # list, read far more often than it is parsed.
+            "requires": "|".join(spec.requires),
+            "min_density": spec.min_density,
+            "min_rows": spec.min_rows,
+            "citation": spec.citation,
+            "returns_fair_value": str(spec.returns_fair_value).lower(),
+        }
+        for spec in sorted(specs.values(), key=lambda s: s.method_id)
+    ]
+    return _write(out / "methods.csv", METHOD_COLUMNS, rows)

@@ -1,0 +1,14 @@
+method_id: realized_price
+family: E_cost
+# Realized cap divided by supply: the average on-chain acquisition price of the circulating
+# supply, and the dissertation's cost-approach anchor. Realized cap is DERIVED from market
+# cap via the MVRV identity (spec 6.2), so this method is flagged circular by construction
+# and is a cost basis rather than independent evidence of value.
+requires:
+  - realized_cap
+  - supply
+min_density: 0.5
+min_rows: 30
+params: {}
+citation: "Coinmetrics (2018), realized capitalisation; dissertation section 3.5"
+returns_fair_value: true

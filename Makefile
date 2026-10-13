@@ -35,6 +35,7 @@ reconcile:
 
 seed:
 	$(PY) -c "from cryptoval.config import load_config; from cryptoval.seeds import write_asset_seeds; _, a = load_config(); print('\n'.join(write_asset_seeds(a, 'dbt/seeds')))"
+	$(PY) -c "from cryptoval.methods.registry import load_method_specs; from cryptoval.seeds import write_method_seed; print(write_method_seed(load_method_specs(), 'dbt/seeds'))"
 
 dbt:
 	cd dbt && ../.venv/bin/dbt build --profiles-dir .

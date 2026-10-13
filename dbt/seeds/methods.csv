@@ -1,0 +1,2 @@
+method_id,family,requires,min_density,min_rows,citation,returns_fair_value
+realized_price,E_cost,realized_cap|supply,0.5,30,"Coinmetrics (2018), realized capitalisation; dissertation section 3.5",true

@@ -84,3 +84,37 @@ def test_the_committed_seeds_match_what_config_generates(tmp_path):
         assert committed.read_bytes() == pathlib.Path(path).read_bytes(), (
             f"{committed} is stale against config/assets.yml; run `make seed` and commit it"
         )
+
+
+def test_the_method_seed_carries_one_row_per_spec(tmp_path):
+    from cryptoval.methods.registry import load_method_specs
+    from cryptoval.seeds import write_method_seed
+
+    specs = load_method_specs()
+    rows = _rows(write_method_seed(specs, str(tmp_path)))
+    assert len(rows) == len(specs)
+    by_id = {r["method_id"]: r for r in rows}
+    assert by_id["realized_price"]["family"] == "E_cost"
+    # Pipe-delimited, like defillama_slugs.
+    assert by_id["realized_price"]["requires"] == "realized_cap|supply"
+
+
+def test_the_method_seed_is_deterministic(tmp_path):
+    from cryptoval.methods.registry import load_method_specs
+    from cryptoval.seeds import write_method_seed
+
+    specs = load_method_specs()
+    first = pathlib.Path(write_method_seed(specs, str(tmp_path / "a"))).read_text(encoding="utf-8")
+    second = pathlib.Path(write_method_seed(specs, str(tmp_path / "b"))).read_text(encoding="utf-8")
+    # Committed generated files must not churn, or every run dirties the tree.
+    assert first == second
+
+
+def test_the_committed_method_seed_matches_what_config_generates(tmp_path):
+    from cryptoval.methods.registry import load_method_specs
+    from cryptoval.seeds import write_method_seed
+
+    fresh = pathlib.Path(write_method_seed(load_method_specs(), str(tmp_path)))
+    repo = pathlib.Path(__file__).parent.parent
+    committed = repo / "dbt" / "seeds" / fresh.name
+    assert committed.read_text(encoding="utf-8") == fresh.read_text(encoding="utf-8")

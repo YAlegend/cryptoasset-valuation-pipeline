@@ -31,3 +31,11 @@ seeds:
         metric_group: varchar
         source_kind: varchar
         source_id: varchar
+    methods:
+      +column_types:
+        method_id: varchar
+        family: varchar
+        requires: varchar
+        min_density: double
+        min_rows: integer
+        returns_fair_value: boolean
