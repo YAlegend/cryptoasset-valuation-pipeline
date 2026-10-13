@@ -236,36 +236,6 @@ def test_a_volume_only_symbol_day_still_carries_a_panel_vintage():
     ]
 
 
-def test_the_two_volume_series_are_both_carried_and_never_coalesced():
-    """Spec 10.1: they differ 5x on BTC, so a method must choose explicitly."""
-    import duckdb
-
-    con = duckdb.connect()
-    con.execute(
-        """
-        create table fct as select * from (values
-            ('BTC', date '2026-10-10', 1.666e12, 'coinmetrics', 2.97e9, 1.48e10),
-            ('TRX', date '2026-10-10', 3.14e10,  'coingecko',   5.84e7, 2.54e8)
-        ) as t(symbol, metric_date, market_cap_usd, market_cap_source,
-               volume_reported_spot_usd, volume_total_usd)
-        """
-    )
-    rows = con.execute(
-        """
-        select symbol, market_cap_source,
-               volume_total_usd / nullif(volume_reported_spot_usd, 0) as ratio
-        from fct order by symbol
-        """
-    ).fetchall()
-    btc = rows[0]
-    # If a model ever coalesced them the ratio would be exactly 1.0 and the 5x gap would
-    # vanish without anyone noticing.
-    assert btc[2] > 4.0
-    # TRX's market cap can only come from CoinGecko; the row says so rather than implying
-    # a Coin Metrics figure.
-    assert rows[1][1] == "coingecko"
-
-
 def test_fct_asset_metrics_daily_sql_keeps_volumes_apart_and_records_the_market_cap_source():
     """Run fct_asset_metrics_daily.sql itself against fixture staging relations."""
     import duckdb
