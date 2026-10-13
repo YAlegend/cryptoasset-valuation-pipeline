@@ -11,12 +11,17 @@ import sys
 import httpx
 import pandas as pd
 
+import cryptoval.methods.cost  # noqa: F401 -- import registers the family
+import cryptoval.methods.monetary  # noqa: F401
+import cryptoval.methods.multiples  # noqa: F401
+import cryptoval.methods.network  # noqa: F401
 from cryptoval.config import Asset, Settings, load_config
 from cryptoval.contracts.checks import check_volume_anomaly, run_checks
 from cryptoval.contracts.identities import run_identity_checks
 from cryptoval.contracts.loader import Contract, load_contract
-from cryptoval.io.bronze import write_bronze, write_silver
+from cryptoval.io.bronze import write_bronze, write_gold, write_silver
 from cryptoval.manifest import RunManifest
+from cryptoval.methods.registry import METHODS, run_methods
 from cryptoval.quarantine import QUARANTINE_COLUMNS, quarantine_impossible
 from cryptoval.scd2 import current_view, merge_scd2, reconcile_report
 from cryptoval.sources.coinmetrics import CoinMetricsSource
@@ -309,6 +314,33 @@ def run_validate(settings: Settings, assets: list[Asset]) -> Validation:
     return Validation(failures, warnings)
 
 
+def _read_panel(settings: Settings) -> pd.DataFrame:
+    """The conformed panel, read from the mart DuckDB built."""
+    import duckdb
+
+    con = duckdb.connect(str(pathlib.Path(settings.data_root) / "cryptoval.duckdb"), read_only=True)
+    try:
+        return con.execute("select * from fct_asset_metrics_daily").fetchdf()
+    finally:
+        con.close()
+
+
+def run_estimate(
+    settings: Settings, assets: list[Asset], method_ids: list[str] | None = None
+) -> dict[str, dict]:
+    panel = _read_panel(settings)
+    estimates = run_methods(panel, METHODS, method_ids)
+    write_gold(settings.resolver, "valuation_estimate", estimates)
+    report: dict[str, dict] = {}
+    for method_id, group in estimates.groupby("method_id"):
+        report[str(method_id)] = {
+            "rows": int(len(group)),
+            "refusals": int((~group["applicable"].astype(bool)).sum()),
+            "symbols": int(group["symbol"].nunique()),
+        }
+    return report
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="cryptoval")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -320,6 +352,10 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--end")
         p.add_argument("--trailing-days", type=int)
     sub.add_parser("validate")
+    est = sub.add_parser("estimate")
+    est.add_argument(
+        "--methods", help="comma-separated method ids; default every registered method"
+    )
 
     args = parser.parse_args(argv)
     settings, assets = load_config()
@@ -328,6 +364,18 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 2
+
+    if args.command == "estimate":
+        ids = [m.strip() for m in args.methods.split(",")] if args.methods else None
+        unknown = [m for m in ids or [] if m not in METHODS]
+        if unknown:
+            print(f"unknown method(s): {unknown}; known: {sorted(METHODS)}", file=sys.stderr)
+            return 2
+        for method_id, outcome in sorted(run_estimate(settings, assets, ids).items()):
+            print(method_id, outcome)
+        # A refusal carrying the measurement that caused it is a research finding, so it
+        # must not read as a failed run.
+        return 0
 
     if args.command == "validate":
         report = run_validate(settings, assets)

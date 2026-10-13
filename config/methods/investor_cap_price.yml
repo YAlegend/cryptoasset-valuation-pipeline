@@ -5,3 +5,14 @@ min_density: 0.5
 min_rows: 30
 params: {}
 citation: "dissertation section 3.5, investor capitalisation"
+
+# Card prose (spec 12): the judgment that cannot be derived from the spec above.
+failure_modes:
+- Investor cap is realized cap minus thermocap, a difference of two large numbers, so a small relative
+  error in either becomes a large one here.
+- It is negative wherever thermocap exceeds realized cap, which is not a price and shows up as a refusal
+  or a nonsense level.
+- Inherits the MVRV identity's fragility (spec 6.2) through realized cap.
+assumptions:
+- Subtracting miner cost from holder cost isolates non-mining investor capital.
+- Both series are denominated and timestamped identically by the vendor.

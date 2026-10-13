@@ -5,3 +5,14 @@ min_density: 0.5
 min_rows: 365
 params: {min_history_rows: 180}
 citation: "dissertation section 3.5, market-value-to-thermocap"
+
+# Card prose (spec 12): the judgment that cannot be derived from the spec above.
+failure_modes:
+- Inherits the MVRV identity's fragility (spec 6.2) through mvtv, which is market cap divided by thermocap.
+- thermocap_has_gap understates the denominator, which inflates the ratio and therefore the reversion
+  target.
+- Thermocap grows monotonically, so the ratio has a structural downward drift that reversion reads as
+  cheapness.
+assumptions:
+- MVTV reverts to its own trailing central tendency within min_history_rows.
+- Cumulative issuance value is comparable across the window despite issuance-schedule changes.

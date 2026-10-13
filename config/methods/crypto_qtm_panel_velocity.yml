@@ -9,3 +9,16 @@ params:
   velocity_source: panel
   circulating_fraction: 1.0
 citation: "dissertation section 3.1 as literally specified; retained to measure the circularity"
+
+# Card prose (spec 12): the judgment that cannot be derived from the spec above.
+failure_modes:
+- 'With velocity taken from the panel the expression collapses to price / circulating_fraction: every
+  residual against price is zero by construction.'
+- It is retained only to measure the circularity against crypto_qtm, and must never be quoted as a fair
+  value.
+- If its fair value ever differs from price / f beyond floating-point tolerance, the derivation or the
+  panel is wrong - investigate before publishing.
+assumptions:
+- The dissertation's section 3.1 formula read literally, with velocity_total (volume / market cap) as
+  the velocity it names.
+- circulating_fraction 1.0, which is why the output equals the price exactly rather than approximately.

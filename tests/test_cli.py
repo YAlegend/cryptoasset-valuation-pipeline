@@ -643,3 +643,57 @@ def test_an_unmapped_protocols_volume_spike_warns_behind_the_marker(tmp_path, mo
     mapped = [w for w in report.warnings if "volume_anomaly[A:total_fees_24h]" in w]
     assert len(mapped) == 1 and "[unmapped" not in mapped[0]
     assert report.failures == []
+
+
+def _realized_cap_panel(symbol, rows, realized_cap):
+    return pd.DataFrame(
+        {
+            "symbol": [symbol] * rows,
+            "metric_date": pd.date_range("2026-01-01", periods=rows, freq="D").date,
+            "realized_cap": realized_cap,
+            "supply": [1.9e7] * rows,
+            "panel_vintage_ts": pd.Timestamp("2026-10-12T08:00:00Z"),
+        }
+    )
+
+
+def test_the_estimate_command_writes_the_gold_table(tmp_path, monkeypatch):
+    settings = Settings(data_root=str(tmp_path))
+    panel = _realized_cap_panel("BTC", 60, [1.0e12 + i * 1.0e9 for i in range(60)])
+    monkeypatch.setattr(cli, "_read_panel", lambda _settings: panel)
+    report = cli.run_estimate(settings, [], method_ids=["realized_price"])
+
+    assert report["realized_price"]["rows"] == 60
+    out = pd.read_parquet(
+        pathlib.Path(settings.resolver.table("gold", "valuation_estimate")) / "part-0.parquet"
+    )
+    assert set(out["method_id"]) == {"realized_price"}
+    assert out["fair_value"].notna().all()
+
+
+def test_the_estimate_command_reports_refusals_without_failing(tmp_path, monkeypatch):
+    """A method that declines is a finding, so the command exits 0 and says how many."""
+    settings = Settings(data_root=str(tmp_path))
+    thin = _realized_cap_panel("BNB", 5, [1.0e10, None, None, None, None])
+    monkeypatch.setattr(cli, "_read_panel", lambda _settings: thin)
+    report = cli.run_estimate(settings, [], method_ids=["realized_price"])
+    assert report["realized_price"]["refusals"] == 1
+    assert report["realized_price"]["rows"] == 1
+
+
+def test_main_exits_zero_when_a_method_refuses(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(
+        cli, "load_config", lambda: (Settings(data_root=str(tmp_path)), [Asset(symbol="BTC")])
+    )
+    monkeypatch.setattr(
+        cli, "_read_panel", lambda _settings: _realized_cap_panel("BNB", 5, [1.0e10] * 5)
+    )
+    assert main(["estimate", "--methods", "realized_price"]) == 0
+    assert "refusals" in capsys.readouterr().out
+
+
+def test_main_rejects_an_unknown_method_id(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        cli, "load_config", lambda: (Settings(data_root=str(tmp_path)), [Asset(symbol="BTC")])
+    )
+    assert main(["estimate", "--methods", "no_such_method"]) == 2

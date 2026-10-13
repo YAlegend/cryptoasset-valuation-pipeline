@@ -9,3 +9,17 @@ params:
   velocity_daily: 0.04        # ~14.6 turns a year; vary it, that is the point
   circulating_fraction: 1.0   # SplyCur is already the circulating supply
 citation: "dissertation section 3.1, crypto quantity theory of money"
+
+# Card prose (spec 12): the judgment that cannot be derived from the spec above.
+failure_modes:
+- 'The estimate scales as 1/velocity, so it is mostly a restatement of velocity_daily: vary the parameter
+  and read the spread, never the point.'
+- volume_total_usd is exchange volume, not monetary transaction demand, so the numerator measures speculation
+  rather than use.
+- holding_time_correction shows the velocity inversion is biased by exp(sigma^2), so the level is wrong
+  even when the direction is right.
+- circulating_fraction 1.0 treats every coin as monetary base, including coins that never move.
+assumptions:
+- An exogenous daily velocity of 0.04 (about 14.6 turns a year), supplied rather than measured - which
+  is what keeps this reading non-circular.
+- MV = PQ holds at daily frequency on a market whose real output Q is unobserved.

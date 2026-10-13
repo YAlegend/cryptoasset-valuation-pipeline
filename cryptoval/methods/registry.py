@@ -16,7 +16,14 @@ import pandas as pd
 import yaml
 
 from cryptoval.hashing import stable_hash
-from cryptoval.methods.base import Estimate, Method, MethodSpec, circularity, resolve_applicability
+from cryptoval.methods.base import (
+    Estimate,
+    Method,
+    MethodSpec,
+    circularity,
+    covered_span,
+    resolve_applicability,
+)
 
 ESTIMATE_COLUMNS = [
     "symbol",
@@ -144,7 +151,9 @@ def run_methods(
         spec = method.spec
         circular = circularity(spec)
         for symbol, group in panel.groupby("symbol", sort=True):
-            frame = group.sort_values("metric_date").reset_index(drop=True)
+            frame = covered_span(
+                spec, group.sort_values("metric_date").reset_index(drop=True)
+            )
             ok, reason = resolve_applicability(spec, frame)
             if not ok:
                 rows.append(_refusal(str(symbol), spec, reason, frame))

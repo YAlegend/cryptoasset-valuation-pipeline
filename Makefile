@@ -1,7 +1,7 @@
 PY := .venv/bin/python
 PIP := .venv/bin/pip
 
-.PHONY: setup test test-integration lint fmt ingest backfill validate reconcile seed dbt all
+.PHONY: setup test test-integration lint fmt ingest backfill validate reconcile seed cards estimate dbt all
 
 setup:
 	python3 -m venv .venv
@@ -37,7 +37,13 @@ seed:
 	$(PY) -c "from cryptoval.config import load_config; from cryptoval.seeds import write_asset_seeds; _, a = load_config(); print('\n'.join(write_asset_seeds(a, 'dbt/seeds')))"
 	$(PY) -c "from cryptoval.methods.registry import load_method_specs; from cryptoval.seeds import write_method_seed; print(write_method_seed(load_method_specs(), 'dbt/seeds'))"
 
+cards:
+	$(PY) -c "from cryptoval.methods.registry import load_method_specs; from cryptoval.cards import load_card_extras, write_cards; print('\n'.join(write_cards(load_method_specs(), 'docs/methods', load_card_extras())))"
+
+estimate:
+	$(PY) -m cryptoval.cli estimate
+
 dbt:
 	cd dbt && ../.venv/bin/dbt build --profiles-dir .
 
-all: lint test ingest dbt validate
+all: lint test ingest dbt estimate dbt validate

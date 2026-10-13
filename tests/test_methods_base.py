@@ -149,3 +149,24 @@ def test_an_estimate_refuses_an_inverted_band():
             reason="",
             panel_vintage_ts=pd.Timestamp("2026-10-12", tz="UTC"),
         )
+
+
+def test_a_late_starting_column_is_not_counted_as_sparsity():
+    """CoinGecko's keyless tier serves 365 days, so a volume column starts in 2025 while
+    Coin Metrics' start in 2015. The void before it is absence of history, not sparsity."""
+    from cryptoval.methods.base import covered_span
+
+    frame = _frame(n=100, realized_nulls=60)
+    span = covered_span(SPEC, frame)
+    assert len(span) == 40
+    ok, reason = resolve_applicability(SPEC, span)
+    assert ok, reason
+
+
+def test_a_wholly_empty_required_column_still_reports_its_density():
+    from cryptoval.methods.base import covered_span
+
+    frame = _frame()
+    frame["realized_cap"] = np.nan
+    ok, reason = resolve_applicability(SPEC, covered_span(SPEC, frame))
+    assert not ok and "0.0% dense" in reason

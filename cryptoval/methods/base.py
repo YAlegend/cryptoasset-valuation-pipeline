@@ -83,6 +83,26 @@ def circularity(spec: MethodSpec) -> tuple[str, ...]:
     return tuple(c for c in spec.requires if c in MARKET_CAP_DERIVED)
 
 
+def covered_span(spec: MethodSpec, frame: pd.DataFrame) -> pd.DataFrame:
+    """Trim to the span in which every required column has started.
+
+    Coverage is not uniform in time: CoinGecko's keyless tier serves 365 days, so
+    volume_total_usd begins in 2025 while Coin Metrics' columns begin in 2015. Density
+    measured over the whole history then reads a late-starting column as 8% sparse and
+    refuses a method that its own trailing window can answer honestly. The pre-coverage
+    void is not sparsity, so it is dropped before applicability is judged -- and the
+    method sees only the span it could legitimately fit on.
+    """
+    starts = [
+        frame[c].first_valid_index() for c in spec.requires if c in frame.columns
+    ]
+    if not starts or any(s is None for s in starts):
+        # A wholly empty required column: leave the frame alone so the 0% density is
+        # what gets reported, rather than an empty-slice reason that hides the cause.
+        return frame
+    return frame.iloc[max(starts) :].reset_index(drop=True)
+
+
 def resolve_applicability(spec: MethodSpec, frame: pd.DataFrame) -> tuple[bool, str]:
     """Decide whether ``spec`` can honestly run on ``frame``.
 

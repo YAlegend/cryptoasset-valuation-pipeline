@@ -17,3 +17,20 @@ params:
   # closely, and it puts the raw 1.0028e9 at ~1,002 EH/s, which is a credible network.
   hashes_per_unit: 1.0e+12
 citation: "Hayes (2017), cost of production model; dissertation section 3.4"
+
+# Card prose (spec 12): the judgment that cannot be derived from the spec above.
+failure_modes:
+- 'A floor, not a target: a miner facing sunk capital sells below marginal cost rather than not at all.'
+- joules_per_hash and electricity_usd_per_kwh are assumptions, not measurements, and the estimate scales
+  linearly in both.
+- The hash-rate unit is calibrated rather than documented - measured as TH/s against BTC on 2026-10-12
+  ($50,668 implied against a price of $81,805, 1.61x; GH/s gives 1,615x and PH/s 0.0016x). A vendor
+  unit change would rescale every estimate by 1,000 silently.
+- Stranded, subsidised or self-generated power breaks the cost argument; ASIC capital cost is excluded,
+  so the floor is understated.
+- Post-Merge ETH has no hash rate, so the series ends rather than going to zero, and the density floor
+  then refuses the asset.
+assumptions:
+- A fleet-average efficiency of 2.0e-11 J/hash and electricity at $0.05/kWh.
+- Coin Metrics' HashRate is in TH/s (hashes_per_unit 1.0e+12), as measured above.
+- Energy is the only material marginal cost of production.
