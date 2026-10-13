@@ -5,6 +5,7 @@ hayes_cost_of_production,E_cost,hash_rate|issuance_usd|price_usd,0.9,180,"Hayes 
 holding_time_correction,A_monetary,velocity_total,0.6,365,Kampakis et al. (2024); corrects dissertation sections 3.1 and 3.6,false
 investor_cap_price,E_cost,investor_cap_usd|supply,0.5,30,"dissertation section 3.5, investor capitalisation",true
 j_curve,A_monetary,volume_total_usd|supply|price_usd,0.6,180,"Burniske (2017), crypto J-curve; dissertation section 3.2",true
+metcalfe_estimated,B_network,market_cap_usd|active_addresses|supply,0.6,365,"Metcalfe (1995); Alabi (2017); Peterson (2018). beta estimated, never assumed to be 2.0",true
 mvrv_reversion,E_cost,realized_cap|mvrv|supply,0.5,365,"Murad Mahmudov & David Puell (2018), MVRV",true
 mvtv_reversion,E_cost,thermocap_usd|mvtv|supply,0.5,365,"dissertation section 3.5, market-value-to-thermocap",true
 realized_price,E_cost,realized_cap|supply,0.5,30,"Coinmetrics (2018), realized capitalisation; dissertation section 3.5",true

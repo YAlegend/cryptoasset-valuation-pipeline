@@ -1,0 +1,11 @@
+method_id: metcalfe_estimated
+family: B_network
+# market_cap_usd is the REGRESSAND, not a derived input, so this method is not circular --
+# active addresses are a genuinely independent fundamental (spec 10.1).
+requires: [market_cap_usd, active_addresses, supply]
+min_density: 0.6
+min_rows: 365
+params:
+  min_fit_rows: 180
+  refit_every_rows: 30
+citation: "Metcalfe (1995); Alabi (2017); Peterson (2018). beta estimated, never assumed to be 2.0"
