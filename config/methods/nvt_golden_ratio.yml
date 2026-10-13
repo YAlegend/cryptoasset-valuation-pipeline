@@ -1,0 +1,7 @@
+method_id: nvt_golden_ratio
+family: D_multiples
+requires: [market_cap_usd, volume_total_usd, supply]
+min_density: 0.6
+min_rows: 1095          # two years of moving average plus a year to use it
+params: {volume_column: volume_total_usd, ma_rows: 730}
+citation: "Dmitry Kalichkin (2018), NVT golden ratio"

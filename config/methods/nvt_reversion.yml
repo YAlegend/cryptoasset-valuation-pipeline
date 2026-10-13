@@ -1,0 +1,7 @@
+method_id: nvt_reversion
+family: D_multiples
+requires: [market_cap_usd, volume_total_usd, supply]
+min_density: 0.6
+min_rows: 365
+params: {volume_column: volume_total_usd, min_history_rows: 180}
+citation: "Willy Woo / Chris Burniske (2017), NVT ratio; dissertation section 3.6"

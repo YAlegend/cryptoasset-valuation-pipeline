@@ -1,0 +1,11 @@
+method_id: price_to_utility
+family: D_multiples
+# velocity_total is market-cap-derived, so this method is flagged circular -- and it also
+# inverts velocity, which is the inversion the holding-time correction invalidates.
+requires: [price_usd, velocity_total, supply]
+min_density: 0.6
+min_rows: 730
+params:
+  staking_ratio: null    # the free tier serves none; supply one to enable the method
+  min_history_rows: 180
+citation: "dissertation section 3.6, price-to-utility ratio"
