@@ -116,7 +116,15 @@ def load_config(config_dir: str = "config") -> tuple[Settings, list[Asset]]:
 
     def _build(row: dict, *, is_equity: bool) -> Asset:
         row = dict(row)
-        row["defillama_slugs"] = tuple(row.get("defillama_slugs") or ())
+        slugs = row.get("defillama_slugs") or ()
+        if isinstance(slugs, str):
+            # tuple("Lido") is ('L','i','d','o'): four slugs that match no protocol, so the
+            # rollup silently emits no revenue for the asset and no check fails.
+            raise ValueError(
+                f"{row.get('symbol')}: defillama_slugs must be a list, "
+                f"got the string {slugs!r}"
+            )
+        row["defillama_slugs"] = tuple(slugs)
         row["metric_sources"] = dict(row.get("metric_sources") or {})
         return Asset(is_equity=is_equity, **row)
 

@@ -125,3 +125,29 @@ def test_a_valuation_group_pointing_at_coingecko_requires_a_gecko_id():
         _validate(
             Asset(symbol="X", sector="defi", cm_id="x", metric_sources={"valuation": "coingecko"})
         )
+
+
+def test_a_bare_string_slug_list_is_rejected(tmp_path):
+    """`defillama_slugs: Lido` would become ('L','i','d','o') and roll up to no revenue."""
+    (tmp_path / "settings.yml").write_text("data_root: ./data\n")
+    (tmp_path / "assets.yml").write_text(
+        "assets:\n  - {symbol: LDO, cm_id: ldo, gecko_id: lido-dao, sector: defi, "
+        "consensus: other, defillama_slugs: Lido}\n"
+    )
+    with pytest.raises(ValueError, match="defillama_slugs must be a list"):
+        load_config(str(tmp_path))
+
+
+def test_a_list_of_slugs_is_still_accepted(tmp_path):
+    (tmp_path / "settings.yml").write_text("data_root: ./data\n")
+    (tmp_path / "assets.yml").write_text(
+        "assets:\n  - {symbol: LDO, cm_id: ldo, gecko_id: lido-dao, sector: defi, "
+        "consensus: other, defillama_slugs: [Lido]}\n"
+    )
+    _, assets = load_config(str(tmp_path))
+    assert assets[0].defillama_slugs == ("Lido",)
+
+
+def test_an_empty_slug_is_rejected():
+    with pytest.raises(ValueError, match="empty entry"):
+        _validate(Asset(symbol="X", sector="defi", cm_id="x", defillama_slugs=("Lido", "  ")))
