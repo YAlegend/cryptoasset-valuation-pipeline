@@ -1,0 +1,19 @@
+method_id: hayes_cost_of_production
+family: E_cost
+# No asset allow-list is needed: HashRate exists on the free tier for exactly the four
+# proof-of-work assets plus ETH to the Merge, so the density floor selects them (spec 10.1).
+requires: [hash_rate, issuance_usd, price_usd]
+min_density: 0.9
+min_rows: 180
+params:
+  # Calibrated in Step 6 against BTC. Both are assumptions, not measurements, and they
+  # travel onto every estimate row because the answer is only as good as they are.
+  joules_per_hash: 2.0e-11
+  electricity_usd_per_kwh: 0.05
+  # MEASURED, not assumed (Step 6, BTC 2026-10-12): Coin Metrics' HashRate is in TH/s.
+  # Implied cost per coin by candidate unit, against a price of $81,805:
+  #   GH/s $50.67 (price/cost 1,615x)  |  TH/s $50,668 (1.61x)  |  PH/s $50.7m (0.0016x)
+  # Only TH/s lands inside Hayes's own finding that price and production cost track
+  # closely, and it puts the raw 1.0028e9 at ~1,002 EH/s, which is a credible network.
+  hashes_per_unit: 1.0e+12
+citation: "Hayes (2017), cost of production model; dissertation section 3.4"

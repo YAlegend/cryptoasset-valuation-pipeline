@@ -153,3 +153,16 @@ def test_method_specs_load_from_yaml():
     assert "realized_cap" in spec.requires
     assert 0.0 <= spec.min_density <= 1.0
     assert spec.citation
+
+
+def test_no_method_param_loads_as_a_string_instead_of_a_number():
+    """YAML 1.1 needs a SIGNED exponent: `1.0e12` loads as the str "1.0e12", `1.0e+12`
+    as a float. HayesCostOfProduction calls float() on its params and so survived it,
+    but hayes_cost_per_coin called directly raised TypeError on the string -- a
+    parameter that works down one code path and breaks down another."""
+    for method_id, spec in load_method_specs().items():
+        for name, value in spec.params.items():
+            assert not isinstance(value, str), (
+                f"{method_id}.{name} is the string {value!r}; write a signed exponent "
+                f"(1.0e+12, not 1.0e12) so YAML parses it as a number"
+            )
