@@ -13,8 +13,14 @@ from cryptoval.scd2 import merge_scd2
 from cryptoval.sources.base import FetchResult
 
 
-def test_all_four_sources_are_registered():
-    assert set(SOURCES) == {"coinmetrics", "defillama", "coingecko", "equities"}
+def test_all_five_sources_are_registered():
+    assert set(SOURCES) == {
+        "coinmetrics",
+        "defillama",
+        "defillama_history",
+        "coingecko",
+        "equities",
+    }
 
 
 def test_write_silver_round_trips(tmp_path):
@@ -542,7 +548,7 @@ def test_an_unmapped_protocols_failure_warns_while_a_mapped_one_blocks(tmp_path)
 
 def test_scoping_leaves_equities_blocking():
     """Equities are entirely in scope; the three vendors with entities outside it are scoped."""
-    assert cli.SCOPED_SOURCES == {"defillama", "coinmetrics", "coingecko"}
+    assert cli.SCOPED_SOURCES == {"defillama", "defillama_history", "coinmetrics", "coingecko"}
     assert "equities" not in cli.SCOPE_KEY
 
 

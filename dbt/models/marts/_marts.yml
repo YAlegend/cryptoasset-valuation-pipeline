@@ -112,14 +112,37 @@ models:
 
   - name: fct_protocol_revenue_daily
     description: >
-      Protocol revenue at the valuation grain (symbol, metric_date); only assets mapped to a
-      DefiLlama slug appear. revenue_regime separates a zero net revenue against non-zero
-      fees (the fee switch is off: a finding) from an unknown one (a gap).
+      Protocol fees and revenue at the valuation grain (symbol, metric_date); only assets
+      mapped to a DefiLlama slug appear. The spine is DefiLlama's per-protocol daily HISTORY
+      (series_source = 'history'); the one-row-per-run snapshot (series_source = 'snapshot')
+      supplies only (symbol, date) pairs the history lacks. revenue_regime separates a zero
+      net revenue against non-zero fees (the fee switch is off: a finding) from an unknown
+      one (a gap).
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: [symbol, metric_date]
     columns:
+      - name: total_fees_usd
+        description: Gross fees for the day, USD (history) or the snapshot's 24h figure.
+      - name: net_revenue_usd
+        description: >
+          Net protocol revenue for the day, USD; may be negative. NULL where the revenue
+          series had not begun (its leading zeros are trimmed as pre-existence) or the
+          protocol reports none, which revenue_regime reports as 'unknown'.
+      - name: total_fees_30d
+        description: >
+          The snapshot's 30-day fee total. NULL on every history row: the history endpoint
+          serves a daily series, not a 30-day aggregate, and none is computed here.
+      - name: methodology_hash
+        description: >
+          Fingerprint of the component protocols' free-text methodology (spec 9.2). History
+          rows hash the fees payload's methodology; snapshot rows hash the overview's.
+      - name: series_source
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['history', 'snapshot']
       - name: revenue_regime
         tests:
           - accepted_values:
@@ -179,6 +202,14 @@ models:
 
   - name: stg_protocol_revenue
     description: DefiLlama protocols rolled up to symbol across the configured slug list.
+    columns:
+      - name: symbol
+        tests: [not_null]
+
+  - name: stg_protocol_fee_history
+    description: >
+      DefiLlama per-protocol daily fee and revenue history rolled up to symbol across the
+      configured slug list.
     columns:
       - name: symbol
         tests: [not_null]

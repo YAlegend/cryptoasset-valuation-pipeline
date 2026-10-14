@@ -1,20 +1,38 @@
--- Protocol revenue at the valuation grain. Only mapped assets appear: the feed carries
--- 2,991 protocols and at most a handful map to anything we value (spec 5.1).
-select
-    symbol,
-    metric_date,
-    total_fees_24h,
-    total_fees_30d,
-    net_revenue_24h,
-    protocol_count,
-    methodology_hash,
-    -- The denominator discipline spec 10.4 demands, made explicit: a zero net revenue
-    -- against non-zero fees is the Uniswap case -- the protocol fee switch is off and all
-    -- fees go to liquidity providers -- which is a finding, not a gap.
-    case
-        when net_revenue_24h is null then 'unknown'
-        when net_revenue_24h = 0 and total_fees_24h > 0 then 'fees_fully_distributed'
-        when net_revenue_24h < 0 then 'net_outflow'
-        else 'retains_revenue'
-    end as revenue_regime
-from {{ ref('stg_protocol_revenue') }}
+-- The history series is the spine; the snapshot supplies only the (symbol, date) pairs the
+-- history does not have. series_source names which produced each row, because a DCF built
+-- half on one and half on the other is not reproducible.
+--
+-- total_fees_30d exists only on snapshot rows: the history endpoint serves a daily series,
+-- not a 30-day aggregate, so it is NULL on every history row rather than computed here.
+with history as (
+    select
+        symbol,
+        metric_date,
+        total_fees_usd,
+        cast(null as double) as total_fees_30d,
+        net_revenue_usd,
+        protocol_count,
+        methodology_hash,
+        'history' as series_source
+    from {{ ref('stg_protocol_fee_history') }}
+),
+snapshot as (
+    select
+        symbol,
+        metric_date,
+        total_fees_24h as total_fees_usd,
+        total_fees_30d,
+        net_revenue_24h as net_revenue_usd,
+        protocol_count,
+        methodology_hash,
+        'snapshot' as series_source
+    from {{ ref('stg_protocol_revenue') }}
+    where (symbol, metric_date) not in (select symbol, metric_date from history)
+),
+unioned as (
+    select * from history
+    union all
+    select * from snapshot
+)
+select *, {{ revenue_regime() }} as revenue_regime
+from unioned

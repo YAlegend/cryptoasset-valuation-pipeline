@@ -10,9 +10,13 @@ from cryptoval.sources.defillama import (
     BASE_URL,
     OVERVIEW_PATH,
     REVENUE_PATH,
+    DefiLlamaHistorySource,
     DefiLlamaSource,
     methodology_hash,
+    parse_fee_history,
     parse_fees_overview,
+    slug_map,
+    trim_leading_zeros,
 )
 
 
@@ -247,3 +251,138 @@ def test_revenue_for_a_protocol_with_no_fees_row_is_reported_not_silently_droppe
     assert set(result.frame["protocol"]) == {"Curve DEX", "Aave V2", "WBTC"}
     assert len(result.errors) == 1
     assert "Ghost Protocol" in result.errors[0]
+
+
+def test_slug_map_reads_display_name_to_slug_from_the_overview(load_fixture):
+    mapping = slug_map(load_fixture("defillama_overview_slugs.json"))
+    assert mapping["Aave V3"] == "aave-v3"
+    assert mapping["Sky Lending"] == "sky-lending"
+    assert mapping["Ethereum"] == "ethereum"
+
+
+def test_parse_fee_history_reads_unix_seconds_as_utc_dates(load_fixture):
+    frame = parse_fee_history(load_fixture("defillama_summary_fees.json"), "net_revenue_usd")
+    assert list(frame.columns) == ["protocol", "metric_date", "net_revenue_usd"]
+    assert frame["metric_date"].dt.tz is not None, "timestamps must be tz-aware UTC"
+    assert frame["metric_date"].iloc[0] == pd.Timestamp("2015-08-07", tz="UTC")
+    assert frame["protocol"].unique().tolist() == ["Ethereum"]
+    # The fixture is the head and tail of a live series; the last point is whatever it was.
+    assert frame["net_revenue_usd"].iloc[-1] == pytest.approx(75211.0)
+
+
+def test_trim_leading_zeros_drops_pre_existence_but_keeps_interior_zeros():
+    frame = pd.DataFrame(
+        {
+            "protocol": "X",
+            "metric_date": pd.date_range("2024-01-01", periods=6, freq="D", tz="UTC"),
+            "net_revenue_usd": [0.0, 0.0, 12.0, 0.0, 5.0, 0.0],
+        }
+    )
+    trimmed, dropped = trim_leading_zeros(frame, "net_revenue_usd")
+    assert dropped == 2
+    assert trimmed["metric_date"].iloc[0] == pd.Timestamp("2024-01-03", tz="UTC")
+    # The interior zeros are real zero-fee days and must survive.
+    assert trimmed["net_revenue_usd"].tolist() == [12.0, 0.0, 5.0, 0.0]
+
+
+def test_trim_leading_zeros_on_an_all_zero_series_returns_nothing_rather_than_everything():
+    frame = pd.DataFrame(
+        {
+            "protocol": "X",
+            "metric_date": pd.date_range("2024-01-01", periods=3, freq="D", tz="UTC"),
+            "net_revenue_usd": [0.0, 0.0, 0.0],
+        }
+    )
+    trimmed, dropped = trim_leading_zeros(frame, "net_revenue_usd")
+    assert trimmed.empty and dropped == 3
+
+
+def _eth_asset():
+    from cryptoval.config import Asset
+
+    return Asset(symbol="ETH", cm_id="eth", gecko_id="ethereum", defillama_slugs=["Ethereum"])
+
+
+def test_history_source_fetches_only_configured_protocols(monkeypatch, load_fixture):
+    overview = load_fixture("defillama_overview_slugs.json")
+    summary = load_fixture("defillama_summary_fees.json")
+    called: list[str] = []
+
+    def fake_get(client, url, params=None, **kwargs):
+        called.append(url)
+        return overview if "/overview/" in url else summary
+
+    monkeypatch.setattr("cryptoval.sources.defillama.get_with_retry", fake_get)
+    result = DefiLlamaHistorySource().fetch(
+        dt.date(2015, 1, 1), dt.date(2026, 10, 13), [_eth_asset()], client=None
+    )
+
+    # One overview call for the slug map, then two per protocol (fees and revenue dataTypes).
+    assert sum("/overview/" in u for u in called) == 1
+    assert sum("/summary/fees/ethereum" in u for u in called) == 2
+    assert not result.frame.empty
+    assert list(result.frame.columns) == [
+        "protocol",
+        "metric_date",
+        "total_fees_usd",
+        "net_revenue_usd",
+        "methodology_hash",
+    ]
+    # The display name, not the payload's, is what the rollup joins on.
+    assert result.frame["protocol"].unique().tolist() == ["Ethereum"]
+    assert result.frame["methodology_hash"].notna().all()
+    # Aave V3 is in the overview but not configured on any asset: it must not be fetched.
+    assert not any("aave-v3" in u for u in called)
+
+
+def test_history_source_names_a_protocol_whose_slug_is_unknown(monkeypatch, load_fixture):
+    from cryptoval.config import Asset
+
+    overview = load_fixture("defillama_overview_slugs.json")
+    monkeypatch.setattr(
+        "cryptoval.sources.defillama.get_with_retry",
+        lambda client, url, params=None, **kw: overview,
+    )
+    assets = [Asset(symbol="MKR", cm_id="mkr", gecko_id="maker", defillama_slugs=["Maker"])]
+    result = DefiLlamaHistorySource().fetch(
+        dt.date(2015, 1, 1), dt.date(2026, 10, 13), assets, client=None
+    )
+    assert any("Maker" in e for e in result.errors), "an unmatched protocol name must be reported"
+
+
+def test_history_source_metadata():
+    s = DefiLlamaHistorySource()
+    assert s.name == "defillama_history"
+    assert s.contract_path.endswith("defillama_history.yml")
+
+
+def test_history_source_does_not_call_routine_trims_or_zero_revenue_an_error(
+    monkeypatch, load_fixture
+):
+    """Leading-zero trims and a zero revenue series are routine; an `errors` entry would
+    mark every ingest "partial" forever. An untracked FEES series is still named."""
+    overview = load_fixture("defillama_overview_slugs.json")
+    summary = load_fixture("defillama_summary_fees.json")
+    zeros = {**summary, "totalDataChart": [[t, 0] for t, _ in summary["totalDataChart"]]}
+
+    def serve(fees, revenue):
+        def fake_get(client, url, params=None, **kwargs):
+            if "/overview/" in url:
+                return overview
+            return revenue if params else fees
+
+        return fake_get
+
+    run = DefiLlamaHistorySource().fetch
+    args = (dt.date(2015, 1, 1), dt.date(2026, 10, 13), [_eth_asset()], None)
+
+    monkeypatch.setattr("cryptoval.sources.defillama.get_with_retry", serve(summary, zeros))
+    result = run(*args)
+    assert result.errors == ()
+    assert result.frame["total_fees_usd"].notna().all()
+    assert result.frame["net_revenue_usd"].isna().all()
+
+    monkeypatch.setattr("cryptoval.sources.defillama.get_with_retry", serve(zeros, summary))
+    result = run(*args)
+    assert any("Ethereum/total_fees_usd" in e for e in result.errors)
+    assert result.frame["total_fees_usd"].isna().all()

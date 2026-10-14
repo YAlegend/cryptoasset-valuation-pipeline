@@ -26,12 +26,13 @@ from cryptoval.methods.registry import METHODS, run_methods
 from cryptoval.quarantine import QUARANTINE_COLUMNS, quarantine_impossible
 from cryptoval.scd2 import current_view, merge_scd2, reconcile_report
 from cryptoval.sources.coinmetrics import CoinMetricsSource
-from cryptoval.sources.defillama import DefiLlamaSource
+from cryptoval.sources.defillama import DefiLlamaHistorySource, DefiLlamaSource
 from cryptoval.sources.prices import CoinGeckoSource, EquitySource
 
 SOURCES = {
     "coinmetrics": CoinMetricsSource(),
     "defillama": DefiLlamaSource(),
+    "defillama_history": DefiLlamaHistorySource(),
     "coingecko": CoinGeckoSource(),
     "equities": EquitySource(),
 }
@@ -39,6 +40,7 @@ SOURCES = {
 SILVER_TABLE = {
     "coinmetrics": "asset_metrics",
     "defillama": "protocol_revenue",
+    "defillama_history": "protocol_fee_history",
     "coingecko": "market_chart",
     "equities": "equity_prices",
 }
@@ -46,6 +48,7 @@ SILVER_TABLE = {
 KEYS = {
     "coinmetrics": ["asset", "metric_date"],
     "defillama": ["protocol", "metric_date"],
+    "defillama_history": ["protocol", "metric_date"],
     "coingecko": ["asset", "metric_date"],
     "equities": ["asset", "metric_date"],
 }
@@ -64,10 +67,16 @@ VOLUME_CHECKS = {
 # CoinGecko can hold an id config no longer maps (a retired ERC-20 wrapper whose data
 # predates quarantine). Neither reaches a mart or a method, so a vendor error there is real
 # but not ours to block on: it warns and names the id. Equities are entirely in scope.
-SCOPE_KEY = {"defillama": "protocol", "coinmetrics": "asset", "coingecko": "asset"}
+SCOPE_KEY = {
+    "defillama": "protocol",
+    "defillama_history": "protocol",
+    "coinmetrics": "asset",
+    "coingecko": "asset",
+}
 SCOPED_SOURCES = set(SCOPE_KEY)
 _SCOPE_LABEL = {
     "defillama": "defillama_slugs",
+    "defillama_history": "defillama_slugs",
     "coinmetrics": "cm_id/metric_sources",
     "coingecko": "gecko_id",
 }
@@ -78,6 +87,7 @@ def _universe(assets: list[Asset]) -> dict[str, set[str]]:
     """The entity ids each scoped source is allowed to block on, derived from config."""
     return {
         "defillama": {slug for a in assets for slug in a.defillama_slugs},
+        "defillama_history": {slug for a in assets for slug in a.defillama_slugs},
         "coinmetrics": {i for a in assets for i in a.cm_ids},
         "coingecko": {a.gecko_id for a in assets if a.gecko_id},
     }

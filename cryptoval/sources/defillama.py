@@ -121,3 +121,150 @@ class DefiLlamaSource:
         frame = fees.merge(revenue, on="protocol", how="left").reindex(columns=PANEL_COLUMNS)
         frame["metric_date"] = pd.Timestamp(end, tz="UTC").normalize()
         return FetchResult(frame, rows_in, tuple(errors))
+
+
+SUMMARY_PATH = "/summary/fees"
+HISTORY_COLUMNS = [
+    "protocol",
+    "metric_date",
+    "total_fees_usd",
+    "net_revenue_usd",
+    "methodology_hash",
+]
+
+
+def slug_map(payload: dict) -> dict[str, str]:
+    """Display name -> URL slug, from the overview payload.
+
+    The configured identity in assets.yml is the display name, because that is what the
+    overview matches on; the summary endpoint is addressed by slug. Both live in the same
+    payload, so the mapping is read rather than hand-maintained -- a hand-written slug is
+    one rebrand away from a silent 404.
+    """
+    return {
+        record["name"]: record["slug"]
+        for record in payload.get("protocols", []) or []
+        if record.get("name") and record.get("slug")
+    }
+
+
+def parse_fee_history(payload: dict, column: str) -> pd.DataFrame:
+    """One protocol's daily series from a /summary/fees response.
+
+    DefiLlama returns [unix_seconds, usd] pairs. Parsed with unit="s", utc=True: a naive
+    timestamp here would shift every cash flow by up to a day against the price panel.
+    """
+    chart = payload.get("totalDataChart") or []
+    if not chart:
+        return pd.DataFrame(columns=["protocol", "metric_date", column])
+    frame = pd.DataFrame(chart, columns=["ts", column])
+    frame["metric_date"] = pd.to_datetime(frame["ts"], unit="s", utc=True).dt.normalize()
+    frame["protocol"] = payload.get("name")
+    frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    return frame[["protocol", "metric_date", column]]
+
+
+def trim_leading_zeros(frame: pd.DataFrame, column: str) -> tuple[pd.DataFrame, int]:
+    """Drop the pre-existence zeros at the head of a series, keeping interior zeros.
+
+    DefiLlama's chart starts at the DATASET's start, not the protocol's: Ethereum's
+    revenue series opens in August 2015 with zeros. Those are "this protocol did not
+    exist", and a DCF that averages them understates the protocol's economics for as long
+    as the window reaches back. An INTERIOR zero is different -- a genuine zero-fee day,
+    or an adapter outage -- and is kept, because dropping it would silently shorten the
+    series that later rows average over.
+    """
+    values = pd.to_numeric(frame[column], errors="coerce").fillna(0.0)
+    nonzero = values.to_numpy().nonzero()[0]
+    if len(nonzero) == 0:
+        return frame.iloc[0:0], len(frame)
+    first = int(nonzero[0])
+    return frame.iloc[first:].reset_index(drop=True), first
+
+
+class DefiLlamaHistorySource:
+    """Per-protocol daily fee and revenue HISTORY (spec 10.4's denominator discipline).
+
+    Separate from DefiLlamaSource rather than folded into it: that source's row grain is
+    one snapshot row per protocol per run, this one's is one row per protocol per DAY of
+    history, and merging two grains into one silver table would make the SCD2 merge
+    compare a 4,000-row backfill against a 1-row snapshot.
+
+    The endpoint serves the whole series regardless of start/end, so those are unused:
+    every run re-reads the full history and SCD2 keeps only what changed.
+    """
+
+    name = "defillama_history"
+    contract_path = "config/contracts/defillama_history.yml"
+
+    def __init__(self, max_retries: int = 5) -> None:
+        self.max_retries = max_retries
+
+    def fetch(
+        self,
+        start: dt.date,
+        end: dt.date,
+        assets: list[Asset],
+        client: httpx.Client,
+    ) -> FetchResult:
+        overview = get_with_retry(
+            client, f"{BASE_URL}{OVERVIEW_PATH}", max_retries=self.max_retries
+        )
+        slugs = slug_map(overview)
+        wanted = {slug for asset in assets for slug in asset.defillama_slugs or []}
+
+        frames: list[pd.DataFrame] = []
+        errors: list[str] = []
+        rows_in = 0
+        # No try/except around the summary calls, for the reason DefiLlamaSource gives: a
+        # failed call that returned partial data would let SCD2 close the stored series.
+        for protocol in sorted(wanted):
+            slug = slugs.get(protocol)
+            if slug is None:
+                # A configured protocol the feed no longer lists: name it. Plan 2 Task 5
+                # already proved this happens (Maker -> Sky Lending).
+                errors.append(f"no DefiLlama slug for configured protocol {protocol!r}")
+                continue
+            series: dict[str, pd.DataFrame] = {}
+            fees_hash = ""
+            for column, data_type in (
+                ("total_fees_usd", None),
+                ("net_revenue_usd", "dailyRevenue"),
+            ):
+                payload = get_with_retry(
+                    client,
+                    f"{BASE_URL}{SUMMARY_PATH}/{slug}",
+                    {"dataType": data_type} if data_type else None,
+                    max_retries=self.max_retries,
+                )
+                if column == "total_fees_usd":
+                    fees_hash = methodology_hash(payload)
+                parsed = parse_fee_history(payload, column)
+                rows_in += len(parsed)
+                trimmed, _ = trim_leading_zeros(parsed, column)
+                if trimmed.empty:
+                    # Fees nobody tracked is a gap worth naming. Revenue that is zero or
+                    # absent is routine (Uniswap V4's fee switch is off), and an `errors`
+                    # entry would make every ingest "partial" forever.
+                    if column == "total_fees_usd":
+                        errors.append(f"{protocol}/{column}: series is entirely zero or empty")
+                    continue
+                # The configured display name, not the payload's: the rollup joins on it.
+                series[column] = trimmed.assign(protocol=protocol)
+
+            if not series:
+                continue
+            merged = None
+            for frame in series.values():
+                merged = (
+                    frame
+                    if merged is None
+                    else merged.merge(frame, on=["protocol", "metric_date"], how="outer")
+                )
+            merged["methodology_hash"] = fees_hash
+            frames.append(merged)
+
+        if not frames:
+            return FetchResult(pd.DataFrame(columns=HISTORY_COLUMNS), rows_in, tuple(errors))
+        combined = pd.concat(frames, ignore_index=True).reindex(columns=HISTORY_COLUMNS)
+        return FetchResult(combined, rows_in, tuple(errors))

@@ -1,0 +1,36 @@
+contract:
+  name: defillama_history
+  version: "1.0.0"
+  owner: yasir
+  source_url: https://api.llama.fi
+
+schema:
+  # Neither value column is required: a protocol DefiLlama tracks fees for but not revenue
+  # for (or the reverse) keeps its other series, and the null-rate ceilings below are the
+  # availability detector instead.
+  required:
+    - protocol
+    - metric_date
+  columns:
+    protocol: {type: string}
+    metric_date: {type: date}
+    # Ceilings are pooled over the table (what check_null_rate measures), set from the live
+    # backfill of 2026-10-14: 27,728 rows, 19 protocols, net_revenue_usd 28.4% null (a
+    # revenue series of zeros is trimmed to nothing: Sky Money, Uniswap V4; the rest are
+    # pre-revenue zeros: Ethereum pre-EIP-1559, Uniswap before its fee switch), and
+    # total_fees_usd 0.0% null. Headroom is deliberate; raise only with a new measurement.
+    total_fees_usd: {type: float, minimum: 0, maximum: 1.0e+11, max_null_fraction: 0.05}
+    # Gross fees cannot be negative. Net revenue CAN be (Plan 2 Task 4's ruling: a protocol
+    # paying out more than it earns is a real event), so it has no floor.
+    net_revenue_usd: {type: float, maximum: 1.0e+11, max_null_fraction: 0.40}
+    methodology_hash: {type: string}
+
+quality:
+  freshness:
+    max_delay_hours: 72
+  uniqueness:
+    combination: [protocol, metric_date]
+  notes: |
+    One row per protocol per DAY of history, from /summary/fees/{slug}. The row grain is
+    why this is a separate contract from defillama_fees.yml (one snapshot row per protocol
+    per run). methodology_hash fingerprints the fees payload's free-text methodology.
