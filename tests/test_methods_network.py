@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import pytest
+from scipy.optimize import least_squares
 
 from cryptoval.methods import network
 from cryptoval.methods.network import (
@@ -118,7 +119,7 @@ def _applicable(method, frame):
     return [e for e in method.estimate(frame, dict(method.spec.params)) if e.applicable]
 
 
-def test_peterson_values_the_network_from_n_squared_and_bitcoin_days_destroyed():
+def test_peterson_values_the_network_from_a_fitted_scale_times_n_squared():
     frame = _network_frame()
     last = _applicable(PetersonMetcalfe(), frame)[-1]
     n = frame["active_addresses"].iloc[-1]
@@ -193,8 +194,12 @@ def _bubble(sign: float = -1.0, noise: float = 0.0) -> pd.Series:
 def test_lppls_refuses_when_the_critical_time_hits_its_bound():
     # A straight line has no singularity: any tc the optimiser finds is an artefact.
     straight = pd.Series(np.log(np.linspace(100.0, 200.0, 400)))
-    fit = fit_lppls(straight, _lppls_params(window_rows=400))
-    assert fit is None
+    params = _lppls_params(window_rows=400)
+    assert fit_lppls(straight, params) is None
+    # Which bound, and therefore which finding: beyond the horizon is an extrapolation,
+    # at-or-before this row is a singularity the window cannot date. Neither fires.
+    status = network._lppls_fit(straight, params)["fit_status"]
+    assert status in {"tc_beyond_horizon", "tc_at_or_before_this_row", "poor_fit"}
 
 
 def test_lppls_detects_a_planted_bubble_so_the_flag_is_not_a_constant_false():
@@ -206,7 +211,11 @@ def test_lppls_detects_a_planted_bubble_so_the_flag_is_not_a_constant_false():
 
 
 def test_lppls_does_not_call_a_falling_path_a_bubble():
-    assert fit_lppls(_bubble(sign=+1.0), _lppls_params()) is None
+    params = _lppls_params()
+    assert fit_lppls(_bubble(sign=+1.0), params) is None
+    fit = network._lppls_fit(_bubble(sign=+1.0), params)
+    # The sign gate, named: b > 0 is an anti-bubble, and the row publishes b either way.
+    assert fit["fit_status"] == "wrong_sign" and fit["b"] > 0
 
 
 def test_lppls_flag_says_no_bubble_rather_than_a_date_when_the_fit_is_poor():
@@ -228,14 +237,45 @@ def test_lppls_optimiser_that_never_converges_is_a_refusal_not_a_no_bubble(monke
     monkeypatch.setattr(network, "least_squares", lambda *a, **k: _Stalled())
     estimates = LpplsBubbleFlag().estimate(_network_frame(), dict(LpplsBubbleFlag.spec.params))
     assert not any(e.applicable for e in estimates)
-    assert "did not converge" in estimates[-1].reason and "8 restarts" in estimates[-1].reason
+    assert "optimiser_failed" in estimates[-1].reason
+    assert "0 of 8 restarts converged" in estimates[-1].reason
 
 
 def test_lppls_carries_a_fit_forward_between_strides_and_says_how_old_it_is():
-    params = {**LpplsBubbleFlag.spec.params, "stride_rows": 5}
-    applicable = [e for e in LpplsBubbleFlag().estimate(_network_frame(), params) if e.applicable]
-    ages = [e.diagnostics["fit_age_rows"] for e in applicable[:10]]
-    assert ages == [0, 1, 2, 3, 4, 0, 1, 2, 3, 4]
+    stride = 5
+    params = {**LpplsBubbleFlag.spec.params, "stride_rows": stride}
+    frame = _network_frame()
+    applicable = [e for e in LpplsBubbleFlag().estimate(frame, params) if e.applicable]
+    # Never staler than the stride, and the fresh fits land on calendar phase rather than
+    # on frame position, so backfilling earlier history cannot move which dates are fresh.
+    assert all(0 <= e.diagnostics["fit_age_rows"] < stride for e in applicable)
+    fresh = {e.metric_date for e in applicable if e.diagnostics["fit_age_rows"] == 0}
+    assert fresh, "some rows must carry a fit of their own"
+    assert all(d.toordinal() % stride == 0 for d in sorted(fresh)[1:])
+
+
+def test_the_stride_phase_does_not_move_when_earlier_history_is_prepended():
+    # Plan 4 compares runs across vintages, so a backfill must not change which dates
+    # carry a freshly fitted verdict.
+    stride = 5
+    params = {**LpplsBubbleFlag.spec.params, "stride_rows": stride}
+    frame = _network_frame()
+    short = frame.iloc[200:].reset_index(drop=True)
+    ages_long = {
+        e.metric_date: e.diagnostics["fit_age_rows"]
+        for e in LpplsBubbleFlag().estimate(frame, params)
+        if e.applicable
+    }
+    ages_short = {
+        e.metric_date: e.diagnostics["fit_age_rows"]
+        for e in LpplsBubbleFlag().estimate(short, params)
+        if e.applicable
+    }
+    # Each frame fits its own first applicable row, so the two agree only once the
+    # shorter one has reached its first calendar phase date: one stride of warm-up.
+    shared = sorted(set(ages_long) & set(ages_short))[stride:]
+    assert len(shared) > 50
+    assert all(ages_long[d] == ages_short[d] for d in shared)
 
 
 def test_lppls_window_with_holes_is_refused_with_its_coverage():
@@ -255,3 +295,99 @@ def test_lppls_flag_reports_the_critical_time_from_the_row_being_valued():
     assert row.diagnostics["fit_status"] == "bubble_regime"
     assert row.diagnostics["critical_time"] == pytest.approx(60.0, abs=10.0)
     assert row.diagnostics["restarts_converged"] >= 1
+
+
+def test_the_variable_projection_fit_is_the_brief_s_seven_parameter_model():
+    """The riskiest reduction in this plan: four linear parameters solved by lstsq inside
+    the residual instead of being free. Same model, or every LPPLS row is wrong."""
+    window = 365
+    values = _bubble().to_numpy()
+    t = np.arange(window, dtype="float64")
+
+    def residual_7(theta):
+        tc, m, omega, a, b, c1, c2 = theta
+        dt = np.clip(tc - t, 1e-8, None)
+        power, phase = dt**m, omega * np.log(dt)
+        return a + b * power + power * (c1 * np.cos(phase) + c2 * np.sin(phase)) - values
+
+    rng = np.random.default_rng(0)  # the same seed the module uses
+    best = None
+    for _ in range(8):
+        guess = [window + rng.uniform(1.0, 180.0), rng.uniform(0.1, 0.9), rng.uniform(6.0, 13.0)]
+        fit = least_squares(
+            residual_7,
+            [*guess, 5.0, -0.4, 0.0, 0.0],
+            method="trf",
+            bounds=(
+                [window + 1.0, 0.1, 6.0, -np.inf, -np.inf, -np.inf, -np.inf],
+                [window + 180.0, 0.9, 13.0, np.inf, np.inf, np.inf, np.inf],
+            ),
+            max_nfev=2000,
+        )
+        if fit.success and (best is None or fit.cost < best.cost):
+            best = fit
+    assert best is not None
+    spread = float(np.ptp(values))
+    reference_rmse = float(np.sqrt(2.0 * best.cost / len(values))) / spread
+
+    reduced = network._lppls_fit(_bubble(), _lppls_params())
+    assert reduced["fit_status"] == "bubble_regime"
+    assert reduced["rmse_ratio"] == pytest.approx(reference_rmse, abs=1e-4)
+    assert reduced["tc"] == pytest.approx(float(best.x[0]), abs=1.0)
+    assert np.sign(reduced["b"]) == np.sign(float(best.x[4]))
+
+
+def test_the_lppls_fit_is_deterministic_across_runs():
+    # A bubble flag that changes between runs of the same panel is not a measurement.
+    params = _lppls_params()
+    first = network._lppls_fit(_bubble(noise=0.02), params)
+    second = network._lppls_fit(_bubble(noise=0.02), params)
+    for key in ("fit_status", "tc", "m", "omega", "b", "rmse_ratio", "restarts_converged"):
+        assert first[key] == second[key], key
+
+
+def test_the_lppls_window_never_contains_the_row_it_values():
+    # The standing prior-only ruling, measured for the third method: shocking the valued
+    # row cannot change its own verdict, because the window ends before it.
+    frame = _network_frame(days=400)
+    frame["price_usd"] = np.exp(np.linspace(4.0, 6.0, 400))
+    params = {**LpplsBubbleFlag.spec.params, "stride_rows": 1}
+    before = LpplsBubbleFlag().estimate(frame, params)[-1]
+    shocked = frame.copy()
+    shocked.loc[shocked.index[-1], "price_usd"] *= 100.0
+    after = LpplsBubbleFlag().estimate(shocked, params)[-1]
+    assert before.applicable == after.applicable
+    assert after.diagnostics["fit_status"] == before.diagnostics["fit_status"]
+    assert after.diagnostics["best_rmse_ratio"] == pytest.approx(
+        before.diagnostics["best_rmse_ratio"]
+    )
+
+
+def test_the_critical_time_is_counted_from_the_row_not_from_the_fit():
+    """`fitted_at` and `position` are different frames, and a 366-row test cannot tell
+    them apart because they coincide there. This one plants tc at an absolute frame row."""
+    window, stride = 365, 5
+    total = 420
+    tc_absolute = 430.0  # a frame row, 10 rows past the frame's end
+    t = np.arange(total, dtype="float64")
+    dt = np.clip(tc_absolute - t, 1e-8, None)
+    path = 5.0 + -0.4 * dt**0.5 * (1.0 + 0.05 * np.cos(8.0 * np.log(dt)))
+    frame = _network_frame(days=total)
+    frame["price_usd"] = np.exp(path)
+    rows = {
+        e.metric_date: e
+        for e in LpplsBubbleFlag().estimate(
+            frame, {**LpplsBubbleFlag.spec.params, "stride_rows": stride}
+        )
+        if e.applicable and e.diagnostics["bubble_regime"]
+    }
+    assert rows, "the planted bubble must be detected somewhere in the frame"
+    for position in range(window, total):
+        row = rows.get(frame["metric_date"].iloc[position])
+        if row is None:
+            continue
+        # critical_time counts rows from THIS row to tc, whatever the fit's own age.
+        assert row.diagnostics["critical_time"] == pytest.approx(
+            tc_absolute - position, abs=12.0
+        ), (position, row.diagnostics["fit_age_rows"])
+    assert any(r.diagnostics["fit_age_rows"] > 0 for r in rows.values()), "test a carried row too"

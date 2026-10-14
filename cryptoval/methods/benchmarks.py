@@ -13,11 +13,13 @@ of here without its own obituary attached.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
+from scipy import stats
 
 from cryptoval.methods.base import Estimate
 from cryptoval.methods.cost import _finite
@@ -31,6 +33,28 @@ _SPECS = load_method_specs()
 # tells you the series both trend, not that one explains the other. Lives here because
 # fit_log_log is the only place this project computes a Durbin-Watson statistic.
 DW_AUTOCORRELATION_FLOOR = 1.5
+
+
+def log_log_band(fit: dict[str, Any], x0: float | None) -> tuple[float, float, float] | None:
+    """The fitted y at ``x0`` with its mean-prediction interval, in y units.
+
+    The interval uses the alpha-beta covariance, which is the whole point: plugging beta's
+    own interval into the line with alpha held fixed is not an interval for the fitted
+    value (the two are negatively correlated) and its bounds swap places when log(x0) is
+    negative. Callers that hold one fit across many rows -- a fit refitted every N rows --
+    get their per-row band from here rather than from a second fit.
+    """
+    if x0 is None or not np.isfinite(x0) or x0 <= 0:
+        return None
+    log_x = float(np.log(x0))
+    mean = float(fit["alpha"] + fit["beta"] * log_x)
+    variance = float(
+        fit["var_alpha"] + 2.0 * log_x * fit["cov_alpha_beta"] + log_x * log_x * fit["var_beta"]
+    )
+    if not np.isfinite(variance) or variance < 0.0:
+        return None
+    half = float(stats.t.ppf(0.975, fit["df_resid"])) * math.sqrt(variance)
+    return float(np.exp(mean)), float(np.exp(mean - half)), float(np.exp(mean + half))
 
 
 def fit_log_log(
@@ -64,6 +88,7 @@ def fit_log_log(
     result = sm.OLS(np.log(frame["y"].to_numpy()), design).fit()
     low, high = result.conf_int()[1]
     dw = float(sm.stats.stattools.durbin_watson(result.resid))
+    covariance = result.cov_params()
     fit = {
         "alpha": float(result.params[0]),
         "beta": float(result.params[1]),
@@ -74,13 +99,15 @@ def fit_log_log(
         # The flag that stops a 0.99 R-squared from being mistaken for evidence.
         "residuals_autocorrelated": bool(dw < DW_AUTOCORRELATION_FLOOR),
         "n": int(len(frame)),
+        # Carried so a caller holding this fit can band a later x without refitting.
+        "var_alpha": float(covariance[0][0]),
+        "cov_alpha_beta": float(covariance[0][1]),
+        "var_beta": float(covariance[1][1]),
+        "df_resid": float(result.df_resid),
     }
-    if predict_at is not None and np.isfinite(predict_at) and predict_at > 0:
-        prediction = result.get_prediction([1.0, float(np.log(predict_at))])
-        ci_low, ci_high = prediction.conf_int()[0]
-        fit["fit_y"] = float(np.exp(prediction.predicted_mean[0]))
-        fit["fit_y_ci_low"] = float(np.exp(ci_low))
-        fit["fit_y_ci_high"] = float(np.exp(ci_high))
+    banded = log_log_band(fit, predict_at) if predict_at is not None else None
+    if banded is not None:
+        fit["fit_y"], fit["fit_y_ci_low"], fit["fit_y_ci_high"] = banded
         # Named on the row: OLS standard errors on autocorrelated residuals are
         # overconfident, so this band is narrower than the fit really supports.
         fit["ci_basis"] = "naive_ols_mean_prediction"

@@ -12,6 +12,7 @@ is the condition under which the R-squared is not evidence of anything.
 
 from __future__ import annotations
 
+import dataclasses
 import math
 
 import numpy as np
@@ -19,7 +20,7 @@ import pandas as pd
 from scipy.optimize import least_squares
 
 from cryptoval.methods.base import Estimate
-from cryptoval.methods.benchmarks import fit_log_log
+from cryptoval.methods.benchmarks import fit_log_log, log_log_band
 from cryptoval.methods.cost import _finite, _window_stats
 from cryptoval.methods.monetary import _refuse
 from cryptoval.methods.registry import load_method_specs, param_set_hash, register
@@ -100,10 +101,15 @@ class MetcalfeEstimated:
                 )
                 continue
 
-            log_adr = float(np.log(addresses))
-            implied = float(np.exp(fit["alpha"] + fit["beta"] * log_adr))
-            low = float(np.exp(fit["alpha"] + fit["beta_ci_low"] * log_adr))
-            high = float(np.exp(fit["alpha"] + fit["beta_ci_high"] * log_adr))
+            # log_log_band, not beta's own interval plugged into the line: the fit is held
+            # across refit_every_rows rows, so the band is computed here at this row's x.
+            banded = log_log_band(fit, float(addresses))
+            if banded is None:
+                out.append(
+                    _refuse(self.spec, row, params, f"no band at active_addresses={addresses}")
+                )
+                continue
+            implied, low, high = banded
             out.append(
                 Estimate(
                     symbol=row.symbol,
@@ -111,10 +117,14 @@ class MetcalfeEstimated:
                     method_id=self.spec.method_id,
                     param_set_hash=phash,
                     fair_value=implied / supply,
-                    band_low=min(low, high) / supply,
-                    band_high=max(low, high) / supply,
+                    band_low=low / supply,
+                    band_high=high / supply,
                     inputs_used={"active_addresses": float(addresses), "supply": supply},
-                    diagnostics={**fit, "fit_rows": fit["n"]},
+                    diagnostics={
+                        **fit,
+                        "fit_rows": fit["n"],
+                        "ci_basis": "naive_ols_mean_prediction",
+                    },
                     applicable=True,
                     panel_vintage_ts=vintage,
                 )
@@ -328,7 +338,7 @@ def _lppls_fit(log_price: pd.Series, params: dict) -> dict:
     lower = [window + 1.0, 0.1, 6.0]
     upper = [window + horizon, 0.9, 13.0]
     rng = np.random.default_rng(0)  # Seeded: a bubble flag must not change between runs.
-    best, converged, statuses = None, 0, []
+    fits, converged, statuses = [], 0, []
     for _ in range(restarts):
         guess = [window + rng.uniform(1.0, horizon), rng.uniform(0.1, 0.9), rng.uniform(6.0, 13.0)]
         try:
@@ -347,31 +357,59 @@ def _lppls_fit(log_price: pd.Series, params: dict) -> dict:
         # (status 0) returns a point the optimiser was still moving from.
         if fit.success:
             converged += 1
-            if best is None or fit.cost < best.cost:
-                best = fit
+            fits.append(fit)
     result["restarts_converged"] = converged
-    if best is None:
+    need_converged = int(params.get("min_restarts_converged", 4))
+    if not fits or converged < need_converged:
         return {
             **result,
             "fit_status": "optimiser_failed",
-            "detail": f"did not converge in any of {restarts} restarts (statuses {statuses})",
+            "detail": (
+                f"only {converged} of {restarts} restarts converged, need {need_converged} "
+                f"(statuses {statuses})"
+            ),
         }
-    rmse_ratio = float(np.sqrt(2.0 * best.cost / len(values))) / spread
-    tc, m, omega = (float(v) for v in best.x)
-    b = float(solve(best.x)[0][1])
-    result.update(best_rmse_ratio=rmse_ratio, tc=tc, m=m, omega=omega, b=b, rmse_ratio=rmse_ratio)
-    # tc pinned to either bound is the optimiser saying "further (or sooner) than you let me look".
-    # trf stops within its tolerance of a bound, not on it (a straight line ends 0.11 rows
-    # short), so "at the bound" is within a margin rather than an equality.
+
     margin = _LPPLS_BOUND_MARGIN * horizon
-    if tc >= window + horizon - margin or tc <= window + 1.0 + margin:
-        return {**result, "fit_status": "tc_at_bound"}
-    # B < 0 is the faster-than-exponential rise; B > 0 is a negative bubble or an anti-bubble.
-    if b >= 0:
-        return {**result, "fit_status": "wrong_sign"}
-    if rmse_ratio > float(params.get("max_rmse_ratio", 0.02)):
-        return {**result, "fit_status": "poor_fit"}
-    return {**result, "fit_status": "bubble_regime"}
+    ceiling = float(params.get("max_rmse_ratio", 0.02))
+
+    def classify(fit) -> dict:
+        """One converged restart's verdict, with the numbers the verdict rests on."""
+        rmse_ratio = float(np.sqrt(2.0 * fit.cost / len(values))) / spread
+        tc, m, omega = (float(v) for v in fit.x)
+        b = float(solve(fit.x)[0][1])
+        measured = {"tc": tc, "m": m, "omega": omega, "b": b, "rmse_ratio": rmse_ratio}
+        # trf stops within its tolerance OF a bound, not on it (a straight line ends 0.11
+        # rows short), so "at the bound" is a margin rather than an equality.
+        if tc >= window + horizon - margin:
+            # The optimiser wants a critical time further out than the horizon allows:
+            # an extrapolation this window cannot support.
+            return {**measured, "fit_status": "tc_beyond_horizon"}
+        if tc <= window + 1.0 + margin:
+            # Pinned at the near bound: the fit wants a critical time at or BEFORE the row
+            # being valued. That is a real finding -- a singularity already passed, or an
+            # imminent one the window cannot date -- but it is not a forward-looking flag,
+            # and the clipped bound cannot tell those two apart. Reported, never fired.
+            return {**measured, "fit_status": "tc_at_or_before_this_row"}
+        # b < 0 is the faster-than-exponential rise; b > 0 is a negative or anti-bubble.
+        if b >= 0:
+            return {**measured, "fit_status": "wrong_sign"}
+        if rmse_ratio > ceiling:
+            return {**measured, "fit_status": "poor_fit"}
+        return {**measured, "fit_status": "bubble_regime"}
+
+    # Every converged restart is gated, cheapest first, because the question is "is there a
+    # fit that passes?" and not "does the cheapest fit pass?". A cheaper rejected fit used
+    # to mask a passing one on 34 of 194 sampled windows.
+    verdicts = [classify(fit) for fit in sorted(fits, key=lambda f: f.cost)]
+    result["best_rmse_ratio"] = verdicts[0]["rmse_ratio"]
+    result["restarts_passing_gates"] = sum(
+        1 for verdict in verdicts if verdict["fit_status"] == "bubble_regime"
+    )
+    chosen = next(
+        (verdict for verdict in verdicts if verdict["fit_status"] == "bubble_regime"), verdicts[0]
+    )
+    return {**result, **chosen}
 
 
 def fit_lppls(log_price: pd.Series, params: dict) -> dict | None:
@@ -386,6 +424,9 @@ def fit_lppls(log_price: pd.Series, params: dict) -> dict | None:
     fit = _lppls_fit(log_price, params)
     if fit["fit_status"] != "bubble_regime":
         return None
+    # tc is in WINDOW coordinates (t = 0 .. window-1), not frame positions. Subtracting a
+    # frame position from it is wrong by however far the window sits into the frame, which
+    # is the bug this docstring exists to prevent.
     return {k: fit[k] for k in ("tc", "m", "omega", "rmse_ratio", "window_rows")}
 
 
@@ -421,12 +462,19 @@ class LpplsBubbleFlag:
             expired = (
                 carried is not None and carried["fit_status"] == "bubble_regime" and remaining < 1
             )
-            if carried is None or position - fitted_at >= stride or expired:
+            on_phase = row.metric_date.toordinal() % stride == 0
+            if carried is None or position - fitted_at >= stride or expired or on_phase:
                 # iloc[:position]: the window ends before this row, prior-only.
                 carried, fitted_at = _lppls_fit(log_price.iloc[:position], params), position
             fit, age = carried, position - fitted_at
             if fit["fit_status"] in _LPPLS_REFUSED:
-                out.append(_refuse(self.spec, row, params, f"{fit['fit_status']}: {fit['detail']}"))
+                stale = f" (fit made {age} rows before this one)" if age else ""
+                refusal = _refuse(
+                    self.spec, row, params, f"{fit['fit_status']}: {fit['detail']}{stale}"
+                )
+                # The measurement in that reason was taken `age` rows ago, and a refusal
+                # that does not say so is a measurement presented as this row's own.
+                out.append(dataclasses.replace(refusal, diagnostics={"fit_age_rows": age}))
                 continue
             detected = fit["fit_status"] == "bubble_regime"
             out.append(
@@ -451,6 +499,10 @@ class LpplsBubbleFlag:
                         "omega": fit["omega"] if detected else None,
                         "rmse_ratio": fit["rmse_ratio"] if detected else None,
                         "best_rmse_ratio": fit["best_rmse_ratio"],
+                        # Published on every row, rejected ones included, so a reader sees
+                        # how far from the line a wrong_sign or poor_fit row actually was.
+                        "b": fit["b"],
+                        "restarts_passing_gates": fit["restarts_passing_gates"],
                         "restarts_converged": fit["restarts_converged"],
                         "restarts_attempted": fit["n_restarts"],
                         "fit_age_rows": age,

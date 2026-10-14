@@ -6,11 +6,17 @@ min_rows: 500
 params:
   window_rows: 365
   # tc may sit at most this far beyond the window's end. Beyond it the "critical time"
-  # is an extrapolation the data cannot support, and the flag must say so.
+  # is an extrapolation the data cannot support (fit_status tc_beyond_horizon). A tc
+  # pinned at the NEAR bound instead (tc_at_or_before_this_row) means the fit wants a
+  # singularity at or before the row being valued, which is a finding of its own and
+  # never a forward-looking flag.
   max_horizon_rows: 180
   # Fit quality floor: residual RMSE as a fraction of the log-price range.
   max_rmse_ratio: 0.02
   n_restarts: 8
+  # A verdict resting on one lucky restart is not a verdict. Below this many converged
+  # restarts the row is refused as optimiser_failed rather than reported.
+  min_restarts_converged: 4
   # Share of the window's rows that must carry a price. A window with holes is refused,
   # not squeezed: dropping rows would compress the time axis the fit is made on.
   min_window_coverage: 0.9
@@ -20,6 +26,14 @@ params:
 returns_fair_value: false
 citation: "Sornette LPPLS; Wheatley et al. (2018) applied to cryptoassets (spec 10.3)"
 failure_modes:
+- 'MEASURED NEGATIVE on this panel: at a 365-row window the flag fires on 0 of 55,125 applicable
+  rows. The binding constraint is fit fidelity, not the bounds -- the best converged fit anywhere
+  has a residual RMSE of 3.34% of its window''s log range against the 2% requirement, the median is
+  9.7%, and no restart on any row passes every gate. Relaxing the floor to 5% would fire on 690
+  rows and to 10% on 6,586, so the floor IS the flag and this panel supports no value of it. Every
+  row publishes best_rmse_ratio, b, fit_status and restarts_passing_gates so a reader can apply
+  their own floor rather than inherit this one.'
+
 - 'The optimiser converges on SOMETHING for almost any smooth series. The bound on tc, the sign
   of the bubble term and the RMSE floor exist to turn that into a "no bubble regime detected";
   without them this method emits a crash date for every asset every day.'
