@@ -34,6 +34,12 @@ select
     o.market_cap_density,
     o.active_address_density,
     o.volume_density,
-    o.hash_rate_density
+    o.hash_rate_density,
+    m.total_supply,
+    m.max_supply,
+    m.supply_as_of
 from {{ ref('assets') }} a
 left join observed o on a.symbol = o.symbol
+-- LEFT: an asset with no CoinGecko row (the equities) keeps its dim_asset row, so "one row
+-- per configured symbol" holds. stg_supply_metadata is one row per symbol, so no fan-out.
+left join {{ ref('stg_supply_metadata') }} m on a.symbol = m.symbol

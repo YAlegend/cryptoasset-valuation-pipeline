@@ -210,6 +210,20 @@ models:
     columns:
       - name: symbol
         tests: [not_null, unique]
+      - name: total_supply
+        description: >
+          CoinGecko total supply (circulating plus locked, net of burns). NULL for the equities
+          and for any asset CoinGecko has no row for. Point-in-time; see supply_as_of.
+      - name: max_supply
+        description: >
+          CoinGecko hard cap. NULL means the asset has NO maximum supply (ETH, SOL, DOGE, TRX)
+          or is not a CoinGecko asset: an FDV-based multiple does not exist for it. Never
+          substitute total_supply -- that publishes a market-cap multiple under an FDV label.
+      - name: supply_as_of
+        description: >
+          Date the current supply figures were first observed (the SCD2 version's
+          effective_start_ts), NOT the date of the latest run. Methods that read the supply
+          columns record it in inputs_used so a reader can see the figure is point-in-time.
 
   - name: stg_asset_metrics
     description: Coin Metrics panel resolved from vendor ids to symbol, one join per metric group.
@@ -241,6 +255,19 @@ models:
     columns:
       - name: symbol
         tests: [not_null]
+
+  - name: stg_supply_metadata
+    description: >
+      CoinGecko current supply metadata resolved to symbol. One row per symbol with a
+      gecko_id and a current CoinGecko row.
+    columns:
+      - name: symbol
+        tests: [not_null, unique]
+      - name: vendor_fully_diluted_valuation
+        description: >
+          CoinGecko's own fully_diluted_valuation, kept under a name that says whose it is.
+          It is NOT max_supply times price: measured against price x total_supply it matches
+          for all 24 assets to within 0.5%. Do not mix it with an FDV computed from max_supply.
 
   - name: stg_equity_prices
     description: Equity and macro closes resolved to symbol via the yahoo_id on the assets seed.

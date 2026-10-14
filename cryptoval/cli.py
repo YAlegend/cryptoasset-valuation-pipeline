@@ -27,13 +27,14 @@ from cryptoval.quarantine import QUARANTINE_COLUMNS, quarantine_impossible
 from cryptoval.scd2 import current_view, merge_scd2, reconcile_report
 from cryptoval.sources.coinmetrics import CoinMetricsSource
 from cryptoval.sources.defillama import DefiLlamaHistorySource, DefiLlamaSource
-from cryptoval.sources.prices import CoinGeckoSource, EquitySource
+from cryptoval.sources.prices import CoinGeckoSource, CoinGeckoSupplySource, EquitySource
 
 SOURCES = {
     "coinmetrics": CoinMetricsSource(),
     "defillama": DefiLlamaSource(),
     "defillama_history": DefiLlamaHistorySource(),
     "coingecko": CoinGeckoSource(),
+    "coingecko_supply": CoinGeckoSupplySource(),
     "equities": EquitySource(),
 }
 
@@ -42,6 +43,7 @@ SILVER_TABLE = {
     "defillama": "protocol_revenue",
     "defillama_history": "protocol_fee_history",
     "coingecko": "market_chart",
+    "coingecko_supply": "supply_metadata",
     "equities": "equity_prices",
 }
 
@@ -50,6 +52,7 @@ KEYS = {
     "defillama": ["protocol", "metric_date"],
     "defillama_history": ["protocol", "metric_date"],
     "coingecko": ["asset", "metric_date"],
+    "coingecko_supply": ["gecko_id"],
     "equities": ["asset", "metric_date"],
 }
 
@@ -73,6 +76,7 @@ SCOPE_KEY = {
     "defillama_history": "protocol",
     "coinmetrics": "asset",
     "coingecko": "asset",
+    "coingecko_supply": "gecko_id",
 }
 SCOPED_SOURCES = set(SCOPE_KEY)
 _SCOPE_LABEL = {
@@ -80,6 +84,7 @@ _SCOPE_LABEL = {
     "defillama_history": "defillama_slugs",
     "coinmetrics": "cm_id/metric_sources",
     "coingecko": "gecko_id",
+    "coingecko_supply": "gecko_id",
 }
 _MAX_NAMED = 8
 
@@ -91,6 +96,7 @@ def _universe(assets: list[Asset]) -> dict[str, set[str]]:
         "defillama_history": {slug for a in assets for slug in a.defillama_slugs},
         "coinmetrics": {i for a in assets for i in a.cm_ids},
         "coingecko": {a.gecko_id for a in assets if a.gecko_id},
+        "coingecko_supply": {a.gecko_id for a in assets if a.gecko_id},
     }
 
 

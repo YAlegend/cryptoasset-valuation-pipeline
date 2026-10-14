@@ -11,9 +11,11 @@ from cryptoval.config import Asset
 from cryptoval.scd2 import merge_scd2
 from cryptoval.sources.prices import (
     CoinGeckoSource,
+    CoinGeckoSupplySource,
     EquitySource,
     compute_velocity,
     parse_market_chart,
+    parse_supply_metadata,
 )
 
 PANEL = ["asset", "metric_date", "price_usd", "market_cap_usd", "volume_usd"]
@@ -342,3 +344,145 @@ def test_default_pacing_is_six_seconds_between_assets():
     # (~24 calls/min) all ended `status: partial` on HTTP 429, failing at assets 2, 21 and
     # 21 of 24. The keyless tier no longer sustains that; 6.0 s is ~10 calls/min.
     assert CoinGeckoSource().sleep_between_assets_s == 6.0
+
+
+# ---- supply metadata (/coins/markets) ---------------------------------------
+
+
+def test_parse_supply_metadata_keeps_a_null_max_supply_null(load_fixture):
+    frame = parse_supply_metadata(load_fixture("coingecko_markets.json")).set_index("gecko_id")
+
+    assert frame.loc["aave", "max_supply"] == pytest.approx(16_000_000.0)
+    # ETH has NO maximum supply. Not zero, not total_supply: null.
+    assert pd.isna(frame.loc["ethereum", "max_supply"])
+    assert frame.loc["ethereum", "total_supply"] == pytest.approx(122_133_648.45963953)
+
+
+def test_parse_supply_metadata_never_falls_back_to_total_supply():
+    payload = [
+        {
+            "id": "x",
+            "circulating_supply": 10.0,
+            "total_supply": 20.0,
+            "max_supply": None,
+            "fully_diluted_valuation": None,
+            "market_cap": 100.0,
+        }
+    ]
+    frame = parse_supply_metadata(payload)
+    assert pd.isna(frame["max_supply"].iloc[0])
+    assert frame["total_supply"].iloc[0] == pytest.approx(20.0)
+
+
+def test_supply_frame_carries_no_run_date():
+    """The capture instant is SCD2's effective_start_ts. A run-date column here would be
+    hashed into row_hash and re-vintage every asset on every daily ingest."""
+    frame = parse_supply_metadata([{"id": "x", "total_supply": 20.0}])
+    assert "supply_as_of" not in frame.columns
+
+
+def _supply_payload(**overrides):
+    base = {
+        "id": "x",
+        "circulating_supply": 10,
+        "total_supply": 20,
+        "max_supply": None,
+        "fully_diluted_valuation": 300,
+    }
+    return [{**base, **overrides}]
+
+
+def test_a_rerun_with_unchanged_vendor_values_opens_no_new_version():
+    """Pins the defect the brief's supply_as_of = today() would have caused: same values,
+    two different run instants, must change nothing."""
+    cols = ["circulating_supply", "total_supply", "max_supply", "fully_diluted_valuation"]
+    first = merge_scd2(
+        None,
+        parse_supply_metadata(_supply_payload()),
+        ["gecko_id"],
+        cols,
+        dt.datetime(2026, 10, 13, 9, tzinfo=dt.UTC),
+    )
+    second = merge_scd2(
+        first,
+        parse_supply_metadata(_supply_payload()),
+        ["gecko_id"],
+        cols,
+        dt.datetime(2026, 10, 14, 9, tzinfo=dt.UTC),
+    )
+    assert len(second) == len(first) == 1
+    assert second["is_current"].tolist() == [True]
+    assert second["effective_start_ts"].iloc[0] == first["effective_start_ts"].iloc[0]
+
+
+def test_a_real_supply_restatement_does_open_a_new_version():
+    cols = ["circulating_supply", "total_supply", "max_supply", "fully_diluted_valuation"]
+    first = merge_scd2(
+        None,
+        parse_supply_metadata(_supply_payload()),
+        ["gecko_id"],
+        cols,
+        dt.datetime(2026, 10, 13, 9, tzinfo=dt.UTC),
+    )
+    second = merge_scd2(
+        first,
+        parse_supply_metadata(_supply_payload(total_supply=21)),
+        ["gecko_id"],
+        cols,
+        dt.datetime(2026, 10, 14, 9, tzinfo=dt.UTC),
+    )
+    assert len(second) == 2 and second["is_current"].sum() == 1
+
+
+def test_integer_json_numbers_hash_like_floats():
+    """The vendor sends 81610 for a price and 21000000.0 for a supply in one payload;
+    int64 against float64 serialises differently in row_hash (the Task 4 defect)."""
+    cols = ["circulating_supply", "total_supply", "max_supply", "fully_diluted_valuation"]
+    # No null column, or iterrows would upcast the row to float and hide the difference.
+    as_float = parse_supply_metadata(
+        _supply_payload(
+            circulating_supply=10.0,
+            total_supply=20.0,
+            max_supply=30.0,
+            fully_diluted_valuation=300.0,
+        )
+    )
+    as_int = parse_supply_metadata(_supply_payload(max_supply=30))
+    first = merge_scd2(None, as_float, ["gecko_id"], cols, dt.datetime(2026, 10, 13, tzinfo=dt.UTC))
+    again = merge_scd2(first, as_int, ["gecko_id"], cols, dt.datetime(2026, 10, 14, tzinfo=dt.UTC))
+    assert len(again) == 1
+
+
+def test_supply_source_metadata():
+    source = CoinGeckoSupplySource()
+    assert source.name == "coingecko_supply"
+    assert source.contract_path.endswith("coingecko_supply.yml")
+
+
+def test_supply_fetch_makes_one_request_for_the_whole_universe(load_fixture):
+    requests: list[httpx.Request] = []
+    client = _client(
+        lambda r: httpx.Response(200, json=load_fixture("coingecko_markets.json")), requests
+    )
+    result = CoinGeckoSupplySource().fetch(
+        START, END, [_asset("ETH", "ethereum"), _asset("AAVE", "aave"), _asset("XXX", None)], client
+    )
+    assert len(requests) == 1
+    assert requests[0].url.params["ids"] == "aave,ethereum"
+    assert sorted(result.frame["gecko_id"]) == ["aave", "ethereum"]
+    assert result.errors == ()
+
+
+def test_supply_fetch_names_an_id_the_vendor_did_not_return(load_fixture):
+    client = _client(lambda r: httpx.Response(200, json=load_fixture("coingecko_markets.json")), [])
+    result = CoinGeckoSupplySource().fetch(
+        START, END, [_asset("ETH", "ethereum"), _asset("SOL", "solana")], client
+    )
+    assert result.errors == ("no market row returned for 1 of 2 requested ids: ['solana']",)
+
+
+def test_supply_fetch_with_no_gecko_id_makes_no_request():
+    requests: list[httpx.Request] = []
+    client = _client(lambda r: httpx.Response(200, json=[]), requests)
+    result = CoinGeckoSupplySource().fetch(START, END, [_asset("XXX", None)], client)
+    assert requests == [] and result.frame.empty

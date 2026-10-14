@@ -148,3 +148,71 @@ class EquitySource:
         return FetchResult(
             frame, len(frame), tuple(f"{t}: no rows returned" for t in missing)
         )
+
+
+SUPPLY_COLUMNS = [
+    "gecko_id",
+    "circulating_supply",
+    "total_supply",
+    "max_supply",
+    "fully_diluted_valuation",
+]
+
+
+def parse_supply_metadata(payload: list[dict]) -> pd.DataFrame:
+    """Supply metadata from /coins/markets.
+
+    max_supply stays NULL when the asset has none (ETH). The tempting fallback to
+    total_supply would turn an FDV multiple into a market-cap multiple wearing an FDV
+    label -- the exact mislabelling spec 10.4's denominator discipline forbids.
+
+    There is deliberately no as-of column: this is a point-in-time snapshot and the instant
+    it was captured is SCD2's effective_start_ts. A run-date column here would be hashed
+    into row_hash and open a new version of every asset on every daily ingest.
+    """
+    frame = pd.DataFrame(
+        [
+            {c: record.get(c if c != "gecko_id" else "id") for c in SUPPLY_COLUMNS}
+            for record in payload or []
+        ]
+    )
+    if frame.empty:
+        return pd.DataFrame(columns=SUPPLY_COLUMNS)
+    for column in SUPPLY_COLUMNS[1:]:
+        # float64 always: the vendor sends 81610 for one field and 21000000.0 for another,
+        # and row_hash serialises int64 and float64 of the same number differently.
+        frame[column] = pd.to_numeric(frame[column], errors="coerce").astype("float64")
+    return frame
+
+
+class CoinGeckoSupplySource:
+    name = "coingecko_supply"
+    contract_path = "config/contracts/coingecko_supply.yml"
+
+    def __init__(self, max_retries: int = 5) -> None:
+        self.max_retries = max_retries
+
+    def fetch(self, start, end, assets, client) -> FetchResult:
+        # start/end are unused: /coins/markets serves the current figures only.
+        ids = sorted({a.gecko_id for a in assets if a.gecko_id})
+        if not ids:
+            return FetchResult(pd.DataFrame(columns=SUPPLY_COLUMNS), 0, ("no gecko_id configured",))
+        # One call for the whole universe: the endpoint takes a comma-separated id list, which
+        # keeps this inside the keyless tier's rate limit. per_page is raised from the default
+        # of 100 so a larger universe cannot be silently truncated; the check below would
+        # also name whatever is cut.
+        payload = get_with_retry(
+            client,
+            f"{BASE_URL}/coins/markets",
+            {"vs_currency": "usd", "ids": ",".join(ids), "sparkline": "false", "per_page": 250},
+            max_retries=self.max_retries,
+            initial_delay=2.0,
+        )
+        frame = parse_supply_metadata(payload)
+        missing = sorted(set(ids) - set(frame["gecko_id"]))
+        errors = (
+            (f"no market row returned for {len(missing)} of {len(ids)} requested ids: {missing}",)
+            if missing
+            else ()
+        )
+        return FetchResult(frame, len(payload or []), errors)

@@ -13,12 +13,13 @@ from cryptoval.scd2 import merge_scd2
 from cryptoval.sources.base import FetchResult
 
 
-def test_all_five_sources_are_registered():
+def test_all_six_sources_are_registered():
     assert set(SOURCES) == {
         "coinmetrics",
         "defillama",
         "defillama_history",
         "coingecko",
+        "coingecko_supply",
         "equities",
     }
 
@@ -110,6 +111,42 @@ def test_successful_ingest_writes_bronze_and_silver_and_a_revision_is_bitemporal
     assert len(silver) == 2
     assert silver.loc[silver["is_current"], "CapMrktCurUSD"].tolist() == [120.0]
     assert silver.loc[~silver["is_current"], "CapMrktCurUSD"].tolist() == [100.0]
+
+
+class _Supply(_Fixed):
+    name = "coingecko_supply"
+    contract_path = "config/contracts/coingecko_supply.yml"
+
+
+def test_a_daily_supply_ingest_with_unchanged_values_opens_no_new_version(
+    tmp_path, monkeypatch, load_fixture
+):
+    """The real ingest path (_value_cols -> row_hash), two runs at different instants."""
+    from cryptoval.sources.prices import parse_supply_metadata
+
+    frame = parse_supply_metadata(load_fixture("coingecko_markets.json"))
+    monkeypatch.setitem(SOURCES, "coingecko_supply", _Supply(frame))
+    args = (
+        Settings(data_root=str(tmp_path)),
+        [],
+        ["coingecko_supply"],
+        dt.date(2026, 10, 13),
+        dt.date(2026, 10, 13),
+    )
+    assert run_ingest(*args)["coingecko_supply"]["status"] == "success"
+    path = tmp_path / "silver" / "supply_metadata" / "part-0.parquet"
+    first = pd.read_parquet(path)
+    assert run_ingest(*args)["coingecko_supply"]["status"] == "success"
+    second = pd.read_parquet(path)
+
+    assert len(first) == len(second) == 2
+    assert second["is_current"].all()
+    assert (second["effective_start_ts"] == first["effective_start_ts"]).all()
+    # ETH's null max_supply survives parquet.
+    assert second.set_index("gecko_id")["max_supply"].isna().to_dict() == {
+        "aave": False,
+        "ethereum": True,
+    }
 
 
 def test_a_null_key_is_recorded_as_a_failed_run_not_filtered(tmp_path, monkeypatch):
@@ -548,7 +585,13 @@ def test_an_unmapped_protocols_failure_warns_while_a_mapped_one_blocks(tmp_path)
 
 def test_scoping_leaves_equities_blocking():
     """Equities are entirely in scope; the three vendors with entities outside it are scoped."""
-    assert cli.SCOPED_SOURCES == {"defillama", "defillama_history", "coinmetrics", "coingecko"}
+    assert cli.SCOPED_SOURCES == {
+        "defillama",
+        "defillama_history",
+        "coinmetrics",
+        "coingecko",
+        "coingecko_supply",
+    }
     assert "equities" not in cli.SCOPE_KEY
 
 
