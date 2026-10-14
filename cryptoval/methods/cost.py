@@ -18,6 +18,7 @@ from typing import Any
 import pandas as pd
 
 from cryptoval.methods.base import Estimate, MethodSpec
+from cryptoval.methods.monetary import _refuse
 from cryptoval.methods.registry import load_method_specs, param_set_hash, register
 
 _SPECS = load_method_specs()
@@ -27,7 +28,7 @@ def _finite(value: Any) -> float | None:
     """None for anything that cannot be a price: NaN, inf, or a non-number."""
     try:
         number = float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     return number if math.isfinite(number) else None
 
@@ -312,6 +313,285 @@ class HayesCostOfProduction:
                     },
                     applicable=True,
                     panel_vintage_ts=vintage,
+                )
+            )
+        return out
+
+
+def _window_stats(series: pd.Series, window: int) -> tuple[pd.Series, pd.Series]:
+    """Observations to date and observations inside the trailing window, per row."""
+    seen = series.notna()
+    return seen.cumsum(), seen.rolling(window, min_periods=1).sum()
+
+
+def _short_window_reason(what: str, to_date: float, in_window: float, window: int) -> str:
+    """A refusal that names its measurement, and which of two causes produced it."""
+    if to_date < window:
+        return f"only {int(to_date)} {what} observations to date, need {window}"
+    return (
+        f"only {int(in_window)} {what} observations in the last {window} rows, need {window} "
+        "(gaps in the window)"
+    )
+
+
+@register
+class MayerMultiple:
+    spec = _SPECS["mayer_multiple"]
+
+    def estimate(self, frame: pd.DataFrame, params: dict) -> list[Estimate]:
+        window = int(params.get("window_rows", 200))
+        target = float(params.get("target_multiple", 1.0))
+        phash = param_set_hash(params)
+        price = pd.to_numeric(frame["price_usd"], errors="coerce")
+        moving = price.rolling(window, min_periods=window).mean()
+        to_date, in_window = _window_stats(price, window)
+
+        out: list[Estimate] = []
+        for position, row in enumerate(frame.itertuples(index=False)):
+            average = _finite(moving.iloc[position])
+            today = _finite(row.price_usd)
+            if average is None:
+                reason = _short_window_reason(
+                    "price", to_date.iloc[position], in_window.iloc[position], window
+                )
+                out.append(_refuse(self.spec, row, params, reason))
+                continue
+            if average <= 0:
+                out.append(_refuse(self.spec, row, params, f"trailing mean price is {average}"))
+                continue
+            out.append(
+                Estimate(
+                    symbol=row.symbol,
+                    metric_date=row.metric_date,
+                    method_id=self.spec.method_id,
+                    param_set_hash=phash,
+                    fair_value=average * target,
+                    band_low=None,
+                    band_high=None,
+                    inputs_used={
+                        "moving_average_price": average,
+                        "window_rows": window,
+                        "target_multiple": target,
+                    },
+                    diagnostics={
+                        "mayer_multiple": (today / average) if today else None,
+                        "status": "diagnostic_not_fair_value",
+                    },
+                    applicable=True,
+                    panel_vintage_ts=getattr(row, "panel_vintage_ts", None),
+                )
+            )
+        return out
+
+
+@register
+class PuellMultiple:
+    spec = _SPECS["puell_multiple"]
+
+    def estimate(self, frame: pd.DataFrame, params: dict) -> list[Estimate]:
+        window = int(params.get("window_rows", 365))
+        target = float(params.get("target_multiple", 1.0))
+        phash = param_set_hash(params)
+        issuance = pd.to_numeric(frame["issuance_usd"], errors="coerce")
+        average = issuance.rolling(window, min_periods=window).mean()
+        to_date, in_window = _window_stats(issuance, window)
+
+        out: list[Estimate] = []
+        for position, row in enumerate(frame.itertuples(index=False)):
+            baseline = _finite(average.iloc[position])
+            today_issuance = _finite(row.issuance_usd)
+            price, supply = _finite(row.price_usd), _finite(row.supply)
+            if baseline is None:
+                reason = _short_window_reason(
+                    "issuance", to_date.iloc[position], in_window.iloc[position], window
+                )
+                out.append(_refuse(self.spec, row, params, reason))
+                continue
+            if baseline <= 0:
+                out.append(_refuse(self.spec, row, params, f"trailing mean issuance is {baseline}"))
+                continue
+            if today_issuance is None or today_issuance <= 0:
+                out.append(
+                    _refuse(
+                        self.spec,
+                        row,
+                        params,
+                        f"no issuance on this day (issuance_usd={row.issuance_usd})",
+                    )
+                )
+                continue
+            if price is None or price <= 0:
+                out.append(
+                    _refuse(
+                        self.spec, row, params, f"no price on this day (price_usd={row.price_usd})"
+                    )
+                )
+                continue
+            # Fair value = the price at which today's issuance revenue would equal its
+            # trailing average, holding coins issued fixed: price x (baseline / today).
+            out.append(
+                Estimate(
+                    symbol=row.symbol,
+                    metric_date=row.metric_date,
+                    method_id=self.spec.method_id,
+                    param_set_hash=phash,
+                    fair_value=price * (baseline * target / today_issuance),
+                    band_low=None,
+                    band_high=None,
+                    inputs_used={
+                        "issuance_usd": today_issuance,
+                        "trailing_mean_issuance_usd": baseline,
+                        "window_rows": window,
+                        "supply": supply,
+                    },
+                    diagnostics={
+                        "puell_multiple": today_issuance / baseline,
+                        "status": "diagnostic_not_fair_value",
+                    },
+                    applicable=True,
+                    panel_vintage_ts=getattr(row, "panel_vintage_ts", None),
+                )
+            )
+        return out
+
+
+@register
+class MvrvZScore:
+    spec = _SPECS["mvrv_z_score"]
+
+    def estimate(self, frame: pd.DataFrame, params: dict) -> list[Estimate]:
+        window = int(params.get("window_rows", 365))
+        target_z = float(params.get("target_z", 0.0))
+        phash = param_set_hash(params)
+        market_cap = pd.to_numeric(frame["market_cap_usd"], errors="coerce")
+        realized = pd.to_numeric(frame["realized_cap"], errors="coerce")
+        deviation = market_cap.rolling(window, min_periods=window).std()
+        to_date, in_window = _window_stats(market_cap, window)
+
+        out: list[Estimate] = []
+        for position, row in enumerate(frame.itertuples(index=False)):
+            sigma = _finite(deviation.iloc[position])
+            cap, real, supply = (
+                _finite(market_cap.iloc[position]),
+                _finite(realized.iloc[position]),
+                _finite(row.supply),
+            )
+            if sigma is None:
+                reason = _short_window_reason(
+                    "market-cap", to_date.iloc[position], in_window.iloc[position], window
+                )
+                out.append(_refuse(self.spec, row, params, reason))
+                continue
+            if sigma <= 0:
+                reason = f"market cap has zero standard deviation over the last {window} rows"
+                out.append(_refuse(self.spec, row, params, reason))
+                continue
+            if cap is None or real is None or supply is None or supply <= 0:
+                missing = [
+                    name
+                    for name, value in (("market_cap_usd", cap), ("realized_cap", real))
+                    if value is None
+                ]
+                if supply is None or supply <= 0:
+                    missing.append(f"supply (={row.supply})")
+                out.append(
+                    _refuse(self.spec, row, params, f"missing on this day: {', '.join(missing)}")
+                )
+                continue
+            out.append(
+                Estimate(
+                    symbol=row.symbol,
+                    metric_date=row.metric_date,
+                    method_id=self.spec.method_id,
+                    param_set_hash=phash,
+                    fair_value=(real + target_z * sigma) / supply,
+                    band_low=None,
+                    band_high=None,
+                    inputs_used={
+                        "market_cap_usd": cap,
+                        "realized_cap": real,
+                        "stdev_market_cap": sigma,
+                        "window_rows": window,
+                        "supply": supply,
+                    },
+                    diagnostics={
+                        "z_score": (cap - real) / sigma,
+                        "status": "circular_realized_cap",
+                    },
+                    applicable=True,
+                    panel_vintage_ts=getattr(row, "panel_vintage_ts", None),
+                )
+            )
+        return out
+
+
+@register
+class EnergyValue:
+    spec = _SPECS["energy_value"]
+
+    def estimate(self, frame: pd.DataFrame, params: dict) -> list[Estimate]:
+        window = int(params.get("window_rows", 365))
+        phash = param_set_hash(params)
+        price = pd.to_numeric(frame["price_usd"], errors="coerce")
+        coins_per_day = pd.to_numeric(frame["issuance_usd"], errors="coerce") / price.where(
+            price > 0
+        )
+        hash_rate = pd.to_numeric(frame["hash_rate"], errors="coerce")
+
+        # Capriole's energy value is 2 x annual energy cost / annual coins issued, which on a
+        # daily basis is 2 x the Hayes cost per coin. Calling hayes_cost_per_coin rather than
+        # restating the arithmetic is the point: the two methods are one piece of evidence.
+        daily_cost = pd.Series(
+            [
+                hayes_cost_per_coin(
+                    hash_rate.iloc[i],
+                    float(params["hashes_per_unit"]),
+                    float(params["joules_per_hash"]),
+                    float(params["electricity_usd_per_kwh"]),
+                    coins_per_day.iloc[i],
+                )
+                for i in range(len(frame))
+            ],
+            index=frame.index,
+            dtype="float64",
+        )
+        smoothed = daily_cost.rolling(window, min_periods=window).mean()
+        to_date, in_window = _window_stats(daily_cost, window)
+
+        out: list[Estimate] = []
+        for position, row in enumerate(frame.itertuples(index=False)):
+            mean_cost = _finite(smoothed.iloc[position])
+            if mean_cost is None:
+                reason = _short_window_reason(
+                    "computable production-cost",
+                    to_date.iloc[position],
+                    in_window.iloc[position],
+                    window,
+                )
+                out.append(_refuse(self.spec, row, params, reason))
+                continue
+            out.append(
+                Estimate(
+                    symbol=row.symbol,
+                    metric_date=row.metric_date,
+                    method_id=self.spec.method_id,
+                    param_set_hash=phash,
+                    fair_value=2.0 * mean_cost,
+                    band_low=None,
+                    band_high=None,
+                    inputs_used={
+                        "trailing_mean_production_cost": mean_cost,
+                        "window_rows": window,
+                        "joules_per_hash": params["joules_per_hash"],
+                        "electricity_usd_per_kwh": params["electricity_usd_per_kwh"],
+                    },
+                    diagnostics={
+                        "derived_from": "hayes_cost_of_production",
+                        "multiplier": 2.0,
+                        "status": "not_independent_of_hayes",
+                    },
+                    applicable=True,
+                    panel_vintage_ts=getattr(row, "panel_vintage_ts", None),
                 )
             )
         return out

@@ -2,8 +2,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from cryptoval.methods.base import circularity
 from cryptoval.methods.cost import (
+    EnergyValue,
     HayesCostOfProduction,
+    MayerMultiple,
+    MvrvZScore,
+    PuellMultiple,
     RealizedPrice,
     ThermocapFloor,
     hayes_cost_per_coin,
@@ -143,3 +148,117 @@ def test_the_hayes_unit_puts_btc_cost_within_an_order_of_magnitude_of_price():
         iss / px,
     )
     assert 0.1 <= px / cost <= 10.0, f"implied cost {cost:,.2f} against price {px:,.2f}"
+
+
+def _cost_frame(days: int = 900) -> pd.DataFrame:
+    dates = pd.date_range("2022-01-01", periods=days, freq="D", tz="UTC")
+    price = 100.0 + np.arange(days) * 0.5
+    supply = 1.0e7 + np.arange(days) * 50.0
+    return pd.DataFrame(
+        {
+            "symbol": "BTC",
+            "metric_date": [d.date() for d in dates],
+            "price_usd": price,
+            "supply": supply,
+            "market_cap_usd": price * supply,
+            "realized_cap": price * supply * 0.7,
+            "issuance_usd": np.full(days, 1.0e6),
+            "hash_rate": np.full(days, 1.0e9),
+            "panel_vintage_ts": pd.Timestamp("2026-10-13", tz="UTC"),
+        }
+    )
+
+
+def test_mayer_multiple_is_price_over_its_own_trailing_mean():
+    frame = _cost_frame()
+    estimates = MayerMultiple().estimate(frame, {"window_rows": 200, "target_multiple": 1.0})
+    last = [e for e in estimates if e.applicable][-1]
+    expected_ma = frame["price_usd"].iloc[-200:].mean()
+    assert last.inputs_used["moving_average_price"] == pytest.approx(expected_ma)
+    assert last.diagnostics["mayer_multiple"] == pytest.approx(
+        frame["price_usd"].iloc[-1] / expected_ma
+    )
+    # target_multiple 1.0 means the fair value IS the moving average.
+    assert last.fair_value == pytest.approx(expected_ma)
+
+
+def test_puell_multiple_refuses_before_a_full_365_row_window():
+    estimates = PuellMultiple().estimate(_cost_frame(days=300), dict(PuellMultiple.spec.params))
+    assert all(not e.applicable for e in estimates)
+    # The refusal names the measured count and the threshold, not just the threshold.
+    assert estimates[-1].reason == "only 300 issuance observations to date, need 365"
+
+
+def test_a_refusal_distinguishes_too_short_from_a_gapped_window():
+    frame = _cost_frame(days=300)
+    frame.loc[250:260, "price_usd"] = np.nan  # 289 observations, but a hole inside the window
+    last = MayerMultiple().estimate(frame, {"window_rows": 200})[-1]
+    assert (
+        last.reason
+        == "only 189 price observations in the last 200 rows, need 200 (gaps in the window)"
+    )
+    short = MayerMultiple().estimate(_cost_frame(days=120), {"window_rows": 200})[-1]
+    assert short.reason == "only 120 price observations to date, need 200"
+
+
+def test_puell_names_which_input_is_missing_today():
+    frame = _cost_frame(days=400)
+    frame.loc[399, "issuance_usd"] = 0.0
+    frame.loc[398, "price_usd"] = np.nan
+    out = PuellMultiple().estimate(frame, {"window_rows": 365})
+    assert out[-1].reason == "no issuance on this day (issuance_usd=0.0)"
+    assert out[-2].reason == "no price on this day (price_usd=nan)"
+
+
+def test_puell_multiple_is_today_over_trailing_mean():
+    frame = _cost_frame(days=400)
+    frame.loc[399, "issuance_usd"] = 2.0e6
+    last = PuellMultiple().estimate(frame, {"window_rows": 365, "target_multiple": 1.0})[-1]
+    mean = frame["issuance_usd"].iloc[-365:].mean()
+    assert last.diagnostics["puell_multiple"] == pytest.approx(2.0e6 / mean)
+    assert last.fair_value == pytest.approx(frame["price_usd"].iloc[-1] * mean / 2.0e6)
+
+
+def test_mvrv_z_score_is_flagged_circular_because_realized_cap_is_derived():
+    assert "realized_cap" in circularity(MvrvZScore.spec)
+    last = [
+        e
+        for e in MvrvZScore().estimate(_cost_frame(), dict(MvrvZScore.spec.params))
+        if e.applicable
+    ][-1]
+    assert "z_score" in last.diagnostics
+
+
+def test_mvrv_z_score_refusal_names_the_measurement():
+    out = MvrvZScore().estimate(_cost_frame(days=100), {"window_rows": 365, "target_z": 0.0})
+    assert out[-1].reason == "only 100 market-cap observations to date, need 365"
+    flat = _cost_frame(days=400)
+    flat["market_cap_usd"] = 5.0e9
+    assert MvrvZScore().estimate(flat, {"window_rows": 365})[-1].reason == (
+        "market cap has zero standard deviation over the last 365 rows"
+    )
+
+
+def test_energy_value_is_exactly_twice_smoothed_hayes():
+    frame = _cost_frame()
+    params = {
+        "window_rows": 365,
+        "joules_per_hash": 2.0e-11,
+        "electricity_usd_per_kwh": 0.05,
+        "hashes_per_unit": 1.0e12,
+    }
+    last = [e for e in EnergyValue().estimate(frame, params) if e.applicable][-1]
+
+    coins_per_day = frame["issuance_usd"] / frame["price_usd"]
+    daily = [
+        hayes_cost_per_coin(1.0e9, 1.0e12, 2.0e-11, 0.05, c) for c in coins_per_day.iloc[-365:]
+    ]
+    assert last.fair_value == pytest.approx(2.0 * float(np.mean(daily)))
+    # The card must not claim independence from Hayes; the diagnostics say so on every row.
+    assert last.diagnostics["derived_from"] == "hayes_cost_of_production"
+
+
+def test_energy_value_refusal_counts_computable_days():
+    params = dict(EnergyValue.spec.params)
+    out = EnergyValue().estimate(_cost_frame(days=300), params)
+    assert out[-1].reason == "only 300 computable production-cost observations to date, need 365"

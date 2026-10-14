@@ -1,0 +1,17 @@
+method_id: mvrv_z_score
+family: E_cost
+# realized_cap is market-cap-derived (spec 6.2), so the registry flags this method circular.
+requires: [market_cap_usd, realized_cap, supply]
+min_density: 0.8
+min_rows: 730
+params: {window_rows: 365, target_z: 0.0}
+citation: "Awe and Wonder / Murad Mahmudov, MVRV Z-score; dissertation section 3.5"
+failure_modes:
+- 'Circular by construction: realized cap is derived from market cap through the MVRV identity
+  (spec 6.2), so this scores market cap against a transform of itself.'
+- The standard deviation is of market cap in dollars, so the Z-score is not comparable across assets
+  of different size, nor across eras of one asset.
+- A trailing-window standard deviation on a trending series understates dispersion early and
+  overstates it after a crash.
+assumptions:
+- Market cap reverts toward realized cap, and the trailing window measures the normal spread.
