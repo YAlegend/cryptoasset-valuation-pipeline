@@ -1,0 +1,42 @@
+method_id: lppls_bubble_flag
+family: B_network
+requires: [price_usd]
+min_density: 0.9
+min_rows: 500
+params:
+  window_rows: 365
+  # tc may sit at most this far beyond the window's end. Beyond it the "critical time"
+  # is an extrapolation the data cannot support, and the flag must say so.
+  max_horizon_rows: 180
+  # Fit quality floor: residual RMSE as a fraction of the log-price range.
+  max_rmse_ratio: 0.02
+  n_restarts: 8
+  # Share of the window's rows that must carry a price. A window with holes is refused,
+  # not squeezed: dropping rows would compress the time axis the fit is made on.
+  min_window_coverage: 0.9
+  # The fit is repeated every this many rows and its verdict carried forward in between,
+  # with fit_age_rows on every carried row. Only ever a prior fit: nothing is carried back.
+  stride_rows: 5
+returns_fair_value: false
+citation: "Sornette LPPLS; Wheatley et al. (2018) applied to cryptoassets (spec 10.3)"
+failure_modes:
+- 'The optimiser converges on SOMETHING for almost any smooth series. The bound on tc, the sign
+  of the bubble term and the RMSE floor exist to turn that into a "no bubble regime detected";
+  without them this method emits a crash date for every asset every day.'
+- 'Three different things are NOT the same and are kept apart on every row. fit_status says which:
+  bubble_regime (all gates passed); tc_at_bound, wrong_sign or poor_fit (an optimiser result that
+  was rejected - applicable, no bubble); and, as a REFUSAL rather than a negative, optimiser_failed
+  (no restart converged), window_gaps and flat_window. A non-converging optimiser is never reported
+  as "no bubble".'
+- 'A detected bubble regime is not a forecast: LPPLS identifies a faster-than-exponential pattern,
+  and the literature''s own out-of-sample record on crypto is contested.'
+- The fit is on a fixed trailing window, so a regime that began before the window opens is invisible.
+- Multi-start optimisation makes the result depend on the restart count; n_restarts travels on every
+  row for reproducibility, and the restarts are seeded.
+- The RMSE floor is tight against daily crypto noise, so the flag may fire rarely or never on an
+  asset; restarts_converged and best_rmse_ratio travel on every row so a reader can see how close
+  a rejected fit came.
+- The fit runs every stride_rows rows and carries its verdict between; fit_age_rows says how stale.
+assumptions:
+- A bubble is a faster-than-exponential price path with log-periodic oscillations.
+- 365 rows is long enough to contain such a regime and short enough to be one regime.

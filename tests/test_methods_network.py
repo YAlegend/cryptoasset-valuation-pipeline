@@ -2,7 +2,15 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from cryptoval.methods.network import MetcalfeEstimated, fit_metcalfe
+from cryptoval.methods import network
+from cryptoval.methods.network import (
+    LpplsBubbleFlag,
+    MetcalfeEstimated,
+    NvmRatio,
+    PetersonMetcalfe,
+    fit_lppls,
+    fit_metcalfe,
+)
 
 
 def _frame(n: int = 800, beta: float = 1.69, noise: float = 0.15, seed: int = 3) -> pd.DataFrame:
@@ -85,3 +93,165 @@ def test_a_flat_address_series_is_refused_rather_than_fitted():
     out = MetcalfeEstimated().estimate(frame, {"min_fit_rows": 180, "refit_every_rows": 30})
     assert not any(e.applicable for e in out)
     assert "no variation" in out[-1].reason
+
+
+def _network_frame(days: int = 800) -> pd.DataFrame:
+    dates = pd.date_range("2022-01-01", periods=days, freq="D", tz="UTC")
+    addresses = np.linspace(2.0e5, 1.1e6, days)
+    price = 50.0 + np.arange(days) * 0.2
+    supply = np.full(days, 1.0e8)
+    return pd.DataFrame(
+        {
+            "symbol": "ETH",
+            "metric_date": [d.date() for d in dates],
+            "active_addresses": addresses,
+            "price_usd": price,
+            "supply": supply,
+            "market_cap_usd": price * supply,
+            "tx_count": addresses * 3.0,
+            "panel_vintage_ts": pd.Timestamp("2026-10-13", tz="UTC"),
+        }
+    )
+
+
+def _applicable(method, frame):
+    return [e for e in method.estimate(frame, dict(method.spec.params)) if e.applicable]
+
+
+def test_peterson_values_the_network_from_n_squared_and_bitcoin_days_destroyed():
+    frame = _network_frame()
+    last = _applicable(PetersonMetcalfe(), frame)[-1]
+    n = frame["active_addresses"].iloc[-1]
+    assert last.inputs_used["pairs"] == pytest.approx(n * (n - 1) / 2.0)
+    assert last.fair_value > 0
+    assert last.diagnostics["scale_constant_is_fitted"] is True
+
+
+def test_peterson_and_nvm_do_not_value_a_row_with_its_own_market_cap():
+    """Ruling 1: the scale constant and the Metcalfe line come from PRIOR rows only."""
+    base = _network_frame()
+    bumped = base.copy()
+    bumped.loc[bumped.index[-1], "market_cap_usd"] *= 10.0
+    for method in (PetersonMetcalfe(), NvmRatio()):
+        before = _applicable(method, base)[-1]
+        after = _applicable(method, bumped)[-1]
+        assert before.fair_value == after.fair_value
+        assert before.diagnostics.get("alpha") == after.diagnostics.get("alpha")
+        assert before.inputs_used.get("scale_constant") == after.inputs_used.get("scale_constant")
+
+
+def test_nvm_ratio_reports_the_deviation_and_is_not_a_fair_value():
+    last = _applicable(NvmRatio(), _network_frame())[-1]
+    assert last.fair_value is None, "NVM is a deviation series, not a price"
+    assert "nvm" in last.diagnostics
+    assert NvmRatio.spec.returns_fair_value is False
+
+
+def test_nvm_is_market_cap_over_the_metcalfe_line_and_refusals_name_their_measurement():
+    frame = _network_frame()
+    estimates = NvmRatio().estimate(frame, dict(NvmRatio.spec.params))
+    last = [e for e in estimates if e.applicable][-1]
+    assert last.diagnostics["nvm"] == pytest.approx(
+        last.inputs_used["market_cap_usd"] / last.inputs_used["metcalfe_implied_cap"]
+    )
+    assert "only 50 usable" in estimates[50].reason and "need 180" in estimates[50].reason
+
+    constant = frame.assign(active_addresses=5.0e5)
+    flat = NvmRatio().estimate(constant, dict(NvmRatio.spec.params))[400]
+    assert not flat.applicable and "no variation" in flat.reason
+
+
+def test_peterson_refusal_names_the_count_and_the_day_level_cause():
+    frame = _network_frame()
+    short = PetersonMetcalfe().estimate(frame, dict(PetersonMetcalfe.spec.params))[50]
+    assert "only 50 usable" in short.reason and "need 180" in short.reason
+    frame.loc[frame.index[500], "active_addresses"] = np.nan
+    day = PetersonMetcalfe().estimate(frame, dict(PetersonMetcalfe.spec.params))[500]
+    assert not day.applicable and "active_addresses" in day.reason
+
+
+def _lppls_params(**over):
+    return {
+        "max_horizon_rows": 180,
+        "max_rmse_ratio": 0.02,
+        "window_rows": 365,
+        "n_restarts": 8,
+        "min_window_coverage": 0.9,
+        **over,
+    }
+
+
+def _bubble(sign: float = -1.0, noise: float = 0.0) -> pd.Series:
+    """A genuine LPPLS path: tc 60 rows after a 365-row window, m=0.5, omega=8."""
+    t = np.arange(365, dtype="float64")
+    dt = 425.0 - t
+    path = 5.0 + sign * 0.4 * dt**0.5 * (1.0 + 0.05 * np.cos(8.0 * np.log(dt)))
+    rng = np.random.default_rng(1)
+    return pd.Series(path + rng.normal(0, noise, len(t)))
+
+
+def test_lppls_refuses_when_the_critical_time_hits_its_bound():
+    # A straight line has no singularity: any tc the optimiser finds is an artefact.
+    straight = pd.Series(np.log(np.linspace(100.0, 200.0, 400)))
+    fit = fit_lppls(straight, _lppls_params(window_rows=400))
+    assert fit is None
+
+
+def test_lppls_detects_a_planted_bubble_so_the_flag_is_not_a_constant_false():
+    """The positive control: a flag that never fires is indistinguishable from a broken one."""
+    fit = fit_lppls(_bubble(), _lppls_params())
+    assert fit is not None
+    assert 365 < fit["tc"] < 365 + 180
+    assert fit["rmse_ratio"] <= 0.02
+
+
+def test_lppls_does_not_call_a_falling_path_a_bubble():
+    assert fit_lppls(_bubble(sign=+1.0), _lppls_params()) is None
+
+
+def test_lppls_flag_says_no_bubble_rather_than_a_date_when_the_fit_is_poor():
+    estimates = LpplsBubbleFlag().estimate(_network_frame(), dict(LpplsBubbleFlag.spec.params))
+    applicable = [e for e in estimates if e.applicable]
+    assert applicable, "the flag is applicable even when it detects nothing"
+    assert applicable[-1].fair_value is None
+    assert applicable[-1].diagnostics["bubble_regime"] is False
+    assert applicable[-1].diagnostics["critical_time"] is None
+    assert applicable[-1].diagnostics["fit_status"] != "bubble_regime"
+
+
+def test_lppls_optimiser_that_never_converges_is_a_refusal_not_a_no_bubble(monkeypatch):
+    """The silent degrade this method must not have: failure looking like a negative."""
+
+    class _Stalled:
+        success, status, cost, x = False, 0, 1.0, np.zeros(7)
+
+    monkeypatch.setattr(network, "least_squares", lambda *a, **k: _Stalled())
+    estimates = LpplsBubbleFlag().estimate(_network_frame(), dict(LpplsBubbleFlag.spec.params))
+    assert not any(e.applicable for e in estimates)
+    assert "did not converge" in estimates[-1].reason and "8 restarts" in estimates[-1].reason
+
+
+def test_lppls_carries_a_fit_forward_between_strides_and_says_how_old_it_is():
+    params = {**LpplsBubbleFlag.spec.params, "stride_rows": 5}
+    applicable = [e for e in LpplsBubbleFlag().estimate(_network_frame(), params) if e.applicable]
+    ages = [e.diagnostics["fit_age_rows"] for e in applicable[:10]]
+    assert ages == [0, 1, 2, 3, 4, 0, 1, 2, 3, 4]
+
+
+def test_lppls_window_with_holes_is_refused_with_its_coverage():
+    frame = _network_frame()
+    frame.loc[frame.index[600:700], "price_usd"] = np.nan
+    estimates = LpplsBubbleFlag().estimate(frame, dict(LpplsBubbleFlag.spec.params))
+    assert "window_gaps" in estimates[750].reason
+    assert "prices" in estimates[750].reason
+
+
+def test_lppls_flag_reports_the_critical_time_from_the_row_being_valued():
+    """A planted tc 60 rows past a 365-row window: the first valued row is 60 rows from it."""
+    frame = _network_frame(days=366)
+    frame["price_usd"] = np.exp(_bubble().to_numpy().tolist() + [5.0])
+    row = LpplsBubbleFlag().estimate(frame, dict(LpplsBubbleFlag.spec.params))[-1]
+    assert row.applicable and row.diagnostics["bubble_regime"] is True
+    assert row.diagnostics["fit_status"] == "bubble_regime"
+    assert row.diagnostics["critical_time"] == pytest.approx(60.0, abs=10.0)
+    assert row.diagnostics["restarts_converged"] >= 1

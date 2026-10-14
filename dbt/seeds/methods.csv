@@ -6,13 +6,16 @@ hayes_cost_of_production,E_cost,hash_rate|issuance_usd|price_usd,0.9,180,"Hayes 
 holding_time_correction,A_monetary,velocity_total,0.6,365,Kampakis et al. (2024); corrects dissertation sections 3.1 and 3.6,false
 investor_cap_price,E_cost,investor_cap_usd|supply,0.5,30,"dissertation section 3.5, investor capitalisation",true
 j_curve,A_monetary,volume_total_usd|supply|price_usd,0.6,180,"Burniske (2017), crypto J-curve; dissertation section 3.2",true
+lppls_bubble_flag,B_network,price_usd,0.9,500,Sornette LPPLS; Wheatley et al. (2018) applied to cryptoassets (spec 10.3),false
 mayer_multiple,E_cost,price_usd,0.9,400,"Trace Mayer, Mayer multiple (200-day moving average)",true
 metcalfe_estimated,B_network,market_cap_usd|active_addresses|supply,0.6,365,"Metcalfe (1995); Alabi (2017); Peterson (2018). beta estimated, never assumed to be 2.0",true
 mvrv_reversion,E_cost,realized_cap|mvrv|supply,0.5,365,"Murad Mahmudov & David Puell (2018), MVRV",true
 mvrv_z_score,E_cost,market_cap_usd|realized_cap|supply,0.8,730,"Awe and Wonder / Murad Mahmudov, MVRV Z-score; dissertation section 3.5",true
 mvtv_reversion,E_cost,thermocap_usd|mvtv|supply,0.5,365,"dissertation section 3.5, market-value-to-thermocap",true
+nvm_ratio,B_network,market_cap_usd|active_addresses,0.8,365,Network value to Metcalfe ratio (spec 10.3); the deviation series is the signal,false
 nvt_golden_ratio,D_multiples,market_cap_usd|volume_total_usd|supply,0.6,1095,"Dmitry Kalichkin (2018), NVT golden ratio",true
 nvt_reversion,D_multiples,market_cap_usd|volume_total_usd|supply,0.6,365,"Willy Woo / Chris Burniske (2017), NVT ratio; dissertation section 3.6",true
+peterson_metcalfe,B_network,market_cap_usd|active_addresses|supply,0.8,365,"Timothy Peterson (2018), Metcalfe's law as a model for Bitcoin's value; dissertation 3.3",true
 power_law,F_shelf,price_usd|genesis_date,0.9,730,Santostasi power law; contested - see the 2026 nine-objections paper (spec 10.7),true
 price_to_utility,D_multiples,price_usd|velocity_total|supply,0.6,730,"dissertation section 3.6, price-to-utility ratio",true
 puell_multiple,E_cost,issuance_usd|price_usd,0.9,730,"David Puell (2019), Puell multiple; spec 6.2 derives it from free inputs",true
