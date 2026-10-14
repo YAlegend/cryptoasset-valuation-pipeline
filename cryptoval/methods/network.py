@@ -14,21 +14,20 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import statsmodels.api as sm
-from statsmodels.stats.stattools import durbin_watson
 
 from cryptoval.methods.base import Estimate
+from cryptoval.methods.benchmarks import fit_log_log
 from cryptoval.methods.registry import load_method_specs, param_set_hash, register
 
 _SPECS = load_method_specs()
 
-# Below this, residuals are strongly positively autocorrelated and the fit's R-squared
-# tells you the series both trend, not that one explains the other.
-DW_AUTOCORRELATION_FLOOR = 1.5
-
 
 def fit_metcalfe(market_cap: pd.Series, addresses: pd.Series) -> dict:
-    """OLS of log(market_cap) on log(active_addresses)."""
+    """OLS of log(market_cap) on log(active_addresses).
+
+    The regression itself is ``fit_log_log``; only the guards live here, because their
+    messages become this method's refusal reasons and the shared helper returns None.
+    """
     cap = pd.to_numeric(market_cap, errors="coerce")
     adr = pd.to_numeric(addresses, errors="coerce")
     usable = pd.DataFrame({"cap": cap, "adr": adr}).dropna()
@@ -38,22 +37,10 @@ def fit_metcalfe(market_cap: pd.Series, addresses: pd.Series) -> dict:
     if usable["adr"].nunique() < 2:
         raise ValueError("active_addresses has no variation, so beta is not identified")
 
-    y = np.log(usable["cap"].to_numpy())
-    x = sm.add_constant(np.log(usable["adr"].to_numpy()))
-    model = sm.OLS(y, x).fit()
-    low, high = model.conf_int(alpha=0.05)[1]
-    dw = float(durbin_watson(model.resid))
-    return {
-        "alpha": float(model.params[0]),
-        "beta": float(model.params[1]),
-        "beta_ci_low": float(low),
-        "beta_ci_high": float(high),
-        "r_squared": float(model.rsquared),
-        "durbin_watson": dw,
-        # The flag that stops a 0.99 R-squared from being mistaken for evidence.
-        "residuals_autocorrelated": bool(dw < DW_AUTOCORRELATION_FLOOR),
-        "n": int(len(usable)),
-    }
+    fit = fit_log_log(usable["adr"], usable["cap"], min_rows=30)
+    if fit is None:  # unreachable: the guards above are fit_log_log's own conditions
+        raise ValueError(f"log-log fit failed on {len(usable)} usable observations")
+    return fit
 
 
 @register

@@ -337,6 +337,9 @@ def run_estimate(
         report[str(method_id)] = {
             "rows": int(len(group)),
             "refusals": int((~group["applicable"].astype(bool)).sum()),
+            # Separated from refusals: an exception is a defect, not a measurement, and
+            # counting it as a refusal is how a crash hides inside a plausible number.
+            "raised": int(group["reason"].fillna("").str.startswith("method raised").sum()),
             "symbols": int(group["symbol"].nunique()),
         }
     return report

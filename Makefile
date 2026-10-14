@@ -44,6 +44,7 @@ estimate:
 	$(PY) -m cryptoval.cli estimate
 
 dbt:
-	cd dbt && ../.venv/bin/dbt build --profiles-dir .
+	# full-refresh: a seed CSV that gained a column fails to load otherwise
+	cd dbt && ../.venv/bin/dbt seed --full-refresh --profiles-dir . && ../.venv/bin/dbt build --profiles-dir .
 
 all: lint test ingest dbt estimate dbt validate

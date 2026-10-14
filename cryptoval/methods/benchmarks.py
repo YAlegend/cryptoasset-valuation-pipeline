@@ -27,36 +27,64 @@ from cryptoval.methods.registry import load_method_specs, param_set_hash, regist
 _SPECS = load_method_specs()
 
 
-def fit_log_log(x: pd.Series, y: pd.Series, min_rows: int) -> dict[str, Any] | None:
+# Below this, residuals are strongly positively autocorrelated and the fit's R-squared
+# tells you the series both trend, not that one explains the other. Lives here because
+# fit_log_log is the only place this project computes a Durbin-Watson statistic.
+DW_AUTOCORRELATION_FLOOR = 1.5
+
+
+def fit_log_log(
+    x: pd.Series, y: pd.Series, min_rows: int, predict_at: float | None = None
+) -> dict[str, Any] | None:
     """OLS of log(y) on log(x), returning beta with its confidence interval.
 
-    None rather than an exception below ``min_rows`` or when either series has too few
-    strictly positive values: a caller's job is to turn that into a refusal naming the
-    measurement, and an exception here would become a generic "method raised" row.
+    None rather than an exception below ``min_rows``, when either series has too few
+    strictly positive finite values, or when x has no variation (beta is then not
+    identified): a caller's job is to turn that into a refusal naming the measurement,
+    and an exception here would become a generic "method raised" row.
 
     Durbin-Watson travels with every fit because a log-log regression of two trending
     series reports a high R-squared almost regardless of whether one explains the other
     (spec 10.3's caveat). The statistic is how a reader sees that.
+
+    ``predict_at`` asks for the fitted value at one x, with the mean-prediction
+    confidence interval that uses the alpha-beta covariance. Plugging beta's own interval
+    into the line with alpha held fixed is NOT an interval for the fitted value: alpha and
+    beta are negatively correlated, and the two bounds swap places whenever log(x) < 0.
     """
     frame = pd.DataFrame(
         {"x": pd.to_numeric(x, errors="coerce"), "y": pd.to_numeric(y, errors="coerce")}
-    )
+    ).replace([np.inf, -np.inf], np.nan)
     frame = frame[(frame["x"] > 0) & (frame["y"] > 0)].dropna()
-    if len(frame) < min_rows:
+    # nunique: a constant x makes conf_int()[1] an IndexError rather than a fit.
+    if len(frame) < min_rows or frame["x"].nunique() < 2:
         return None
 
     design = sm.add_constant(np.log(frame["x"].to_numpy()))
     result = sm.OLS(np.log(frame["y"].to_numpy()), design).fit()
     low, high = result.conf_int()[1]
-    return {
+    dw = float(sm.stats.stattools.durbin_watson(result.resid))
+    fit = {
         "alpha": float(result.params[0]),
         "beta": float(result.params[1]),
         "beta_ci_low": float(low),
         "beta_ci_high": float(high),
         "r_squared": float(result.rsquared),
-        "durbin_watson": float(sm.stats.stattools.durbin_watson(result.resid)),
+        "durbin_watson": dw,
+        # The flag that stops a 0.99 R-squared from being mistaken for evidence.
+        "residuals_autocorrelated": bool(dw < DW_AUTOCORRELATION_FLOOR),
         "n": int(len(frame)),
     }
+    if predict_at is not None and np.isfinite(predict_at) and predict_at > 0:
+        prediction = result.get_prediction([1.0, float(np.log(predict_at))])
+        ci_low, ci_high = prediction.conf_int()[0]
+        fit["fit_y"] = float(np.exp(prediction.predicted_mean[0]))
+        fit["fit_y_ci_low"] = float(np.exp(ci_low))
+        fit["fit_y_ci_high"] = float(np.exp(ci_high))
+        # Named on the row: OLS standard errors on autocorrelated residuals are
+        # overconfident, so this band is narrower than the fit really supports.
+        fit["ci_basis"] = "naive_ols_mean_prediction"
+    return fit
 
 
 @register
@@ -76,40 +104,48 @@ class StockToFlow:
         supply = pd.to_numeric(frame["supply"], errors="coerce")
         ratio = supply / flow.where(flow > 0)
         market_cap = pd.to_numeric(frame["market_cap_usd"], errors="coerce")
+        # Counted, not assumed: a refusal has to name which of the two things it lacks.
+        prior_ratios = ratio.gt(0).cumsum().shift(1).fillna(0)
+        prior_issuance_days = issuance_coins.gt(0).cumsum().shift(1).fillna(0)
 
         out: list[Estimate] = []
         for position, row in enumerate(frame.itertuples(index=False)):
-            # shift(1): this row's own ratio never enters the fit that values it.
-            fit = fit_log_log(ratio.iloc[:position], market_cap.iloc[:position], min_fit)
             today = _finite(ratio.iloc[position])
             today_supply = _finite(row.supply)
+            # iloc[:position]: this row's own ratio never enters the fit that values it.
+            fit = fit_log_log(
+                ratio.iloc[:position],
+                market_cap.iloc[:position],
+                min_fit,
+                predict_at=today if today is not None and today > 0 else None,
+            )
             if fit is None:
-                out.append(
-                    _refuse(
-                        self.spec,
-                        row,
-                        params,
-                        f"fewer than {min_fit} prior stock-to-flow observations",
+                if prior_issuance_days.iloc[position] == 0:
+                    reason = (
+                        "no day before this one has positive issuance, so stock-to-flow "
+                        "is undefined rather than short of history"
                     )
-                )
+                else:
+                    reason = (
+                        f"only {int(prior_ratios.iloc[position])} prior stock-to-flow "
+                        f"observations, need {min_fit}"
+                    )
+                out.append(_refuse(self.spec, row, params, reason))
                 continue
             if today is None or today <= 0 or today_supply is None or today_supply <= 0:
                 out.append(
                     _refuse(self.spec, row, params, "no stock-to-flow ratio or supply on this day")
                 )
                 continue
-            implied_cap = float(np.exp(fit["alpha"] + fit["beta"] * np.log(today)))
             out.append(
                 Estimate(
                     symbol=row.symbol,
                     metric_date=row.metric_date,
                     method_id=self.spec.method_id,
                     param_set_hash=phash,
-                    fair_value=implied_cap / today_supply,
-                    band_low=float(np.exp(fit["alpha"] + fit["beta_ci_low"] * np.log(today)))
-                    / today_supply,
-                    band_high=float(np.exp(fit["alpha"] + fit["beta_ci_high"] * np.log(today)))
-                    / today_supply,
+                    fair_value=fit["fit_y"] / today_supply,
+                    band_low=fit["fit_y_ci_low"] / today_supply,
+                    band_high=fit["fit_y_ci_high"] / today_supply,
                     inputs_used={
                         "stock_to_flow": today,
                         "supply": today_supply,
@@ -142,18 +178,25 @@ class PowerLaw:
             ]
         origin = pd.Timestamp(genesis.iloc[0]).tz_localize("UTC")
         days = (pd.to_datetime(frame["metric_date"], utc=True) - origin).dt.days.astype("float64")
+        prior_rows = (days.gt(0) & price.gt(0)).cumsum().shift(1).fillna(0)
 
         out: list[Estimate] = []
         for position, row in enumerate(frame.itertuples(index=False)):
-            fit = fit_log_log(days.iloc[:position], price.iloc[:position], min_fit)
             today = _finite(days.iloc[position])
+            fit = fit_log_log(
+                days.iloc[:position],
+                price.iloc[:position],
+                min_fit,
+                predict_at=today if today is not None and today > 0 else None,
+            )
             if fit is None:
                 out.append(
                     _refuse(
                         self.spec,
                         row,
                         params,
-                        f"fewer than {min_fit} prior observations since genesis",
+                        f"only {int(prior_rows.iloc[position])} prior priced days since "
+                        f"genesis, need {min_fit}",
                     )
                 )
                 continue
@@ -168,9 +211,9 @@ class PowerLaw:
                     metric_date=row.metric_date,
                     method_id=self.spec.method_id,
                     param_set_hash=phash,
-                    fair_value=float(np.exp(fit["alpha"] + fit["beta"] * np.log(today))),
-                    band_low=float(np.exp(fit["alpha"] + fit["beta_ci_low"] * np.log(today))),
-                    band_high=float(np.exp(fit["alpha"] + fit["beta_ci_high"] * np.log(today))),
+                    fair_value=fit["fit_y"],
+                    band_low=fit["fit_y_ci_low"],
+                    band_high=fit["fit_y_ci_high"],
                     inputs_used={"days_since_genesis": today, "genesis_date": origin.date()},
                     diagnostics={**fit, "status": "contested"},
                     applicable=True,
