@@ -114,40 +114,68 @@ models:
     description: >
       Protocol fees and revenue at the valuation grain (symbol, metric_date); only assets
       mapped to a DefiLlama slug appear. The spine is DefiLlama's per-protocol daily HISTORY
-      (series_source = 'history'); the one-row-per-run snapshot (series_source = 'snapshot')
-      supplies only (symbol, date) pairs the history lacks. revenue_regime separates a zero
-      net revenue against non-zero fees (the fee switch is off: a finding) from an unknown
-      one (a gap).
+      and nothing else: the one-row-per-run snapshot contributes total_fees_30d where it
+      covers the same (symbol, date) and contributes NO rows, because its rolling total24h
+      stamped with the capture date duplicated the previous day's complete figure.
+      revenue_regime separates a zero net revenue against non-zero fees (the fee switch is
+      off: a finding) from an unknown one (a gap) and from a day with no activity at all.
+      The current UTC date is absent by construction: a daily aggregate of a day that has
+      not ended is partial, and the vendor's own total24h equals that partial value.
     tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: [symbol, metric_date]
     columns:
       - name: total_fees_usd
-        description: Gross fees for the day, USD (history) or the snapshot's 24h figure.
+        description: >
+          Gross fees for the day, USD, summed over the symbol's configured components. The
+          sum covers only components that reported, so read it with composition_complete.
       - name: net_revenue_usd
         description: >
-          Net protocol revenue for the day, USD; may be negative. NULL where the revenue
-          series had not begun (its leading zeros are trimmed as pre-existence) or the
-          protocol reports none, which revenue_regime reports as 'unknown'.
+          Net protocol revenue for the day, USD; may be negative, and may exceed gross fees
+          where the vendor's two series disagree (18 LINK rows do, by up to 76,669). Zero
+          inside the fee span is a MEASUREMENT -- the protocol earned fees and distributed
+          all of them -- and is labelled fees_fully_distributed. NULL only before the fee
+          series began, where revenue_regime reports 'unknown'.
       - name: total_fees_30d
         description: >
-          The snapshot's 30-day fee total. NULL on every history row: the history endpoint
-          serves a daily series, not a 30-day aggregate, and none is computed here.
+          The snapshot's 30-day fee total, joined on (symbol, metric_date) where the
+          snapshot covers it; NULL everywhere else, including every row the snapshot has
+          not seen. The history endpoint serves a daily series, not a 30-day aggregate,
+          and none is computed here. Measured 100% NULL while the snapshot's single row
+          falls on the dropped partial day.
+      - name: protocol_count
+        description: >
+          How many configured components reported that day. Its meaning CHANGES over time:
+          a rise can be a genuine launch and a fall can be an adapter that has not
+          published yet, so it is not a quality score on its own -- compare it with
+          protocol_count_prior_day, or use composition_complete.
+      - name: protocol_count_prior_day
+        description: The same count on the preceding day, NULL on a symbol's first row.
+      - name: composition_complete
+        description: >
+          False where fewer components reported than on the preceding day, which marks a
+          composition artefact rather than a collapse in cash flow (MKR once read 6,708
+          against 975,064 the day before). A trailing-window consumer must require it.
+        tests: [not_null]
       - name: methodology_hash
         description: >
-          Fingerprint of the component protocols' free-text methodology (spec 9.2). History
-          rows hash the fees payload's methodology; snapshot rows hash the overview's.
+          Fingerprint of the component protocols' free-text methodology (spec 9.2), hashed
+          from the fees payload. It is the CURRENT methodology applied to the whole history,
+          so it cannot detect a definition change the vendor made mid-series, and it also
+          changes when the component composition changes (SNX carries four distinct hashes).
       - name: series_source
         tests:
           - accepted_values:
               arguments:
-                values: ['history', 'snapshot']
+                values: ['history']
       - name: revenue_regime
         tests:
           - accepted_values:
               arguments:
-                values: ['unknown', 'fees_fully_distributed', 'net_outflow', 'retains_revenue']
+                values:
+                  ['unknown', 'fees_fully_distributed', 'net_outflow', 'retains_revenue',
+                   'no_activity']
 
   - name: fct_equity_prices_daily
     description: >

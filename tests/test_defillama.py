@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from cryptoval.scd2 import merge_scd2
 from cryptoval.sources.defillama import (
     BASE_URL,
     OVERVIEW_PATH,
@@ -151,9 +152,7 @@ def _two_call_handler(load_fixture, revenue_status=200):
     return handler
 
 
-def test_net_revenue_comes_from_the_revenue_endpoint_not_the_fees_payload(
-    load_fixture, sleeps
-):
+def test_net_revenue_comes_from_the_revenue_endpoint_not_the_fees_payload(load_fixture, sleeps):
     """The fees overview carries no revenue24h field at all, so the column was 100% null."""
     requested: list[str] = []
 
@@ -185,8 +184,6 @@ def test_a_genuine_zero_revenue_stays_zero(load_fixture, sleeps):
     wbtc = result.frame[result.frame["protocol"] == "WBTC"].iloc[0]
     assert wbtc["net_revenue_24h"] == 0.0
     assert not np.isnan(wbtc["net_revenue_24h"])
-
-
 
 
 def test_a_failed_revenue_call_fails_the_whole_fetch(load_fixture, sleeps):
@@ -261,13 +258,32 @@ def test_slug_map_reads_display_name_to_slug_from_the_overview(load_fixture):
 
 
 def test_parse_fee_history_reads_unix_seconds_as_utc_dates(load_fixture):
-    frame = parse_fee_history(load_fixture("defillama_summary_fees.json"), "net_revenue_usd")
-    assert list(frame.columns) == ["protocol", "metric_date", "net_revenue_usd"]
+    frame = parse_fee_history(load_fixture("defillama_summary_fees.json"), "total_fees_usd")
+    assert list(frame.columns) == ["protocol", "metric_date", "total_fees_usd"]
     assert frame["metric_date"].dt.tz is not None, "timestamps must be tz-aware UTC"
     assert frame["metric_date"].iloc[0] == pd.Timestamp("2015-08-07", tz="UTC")
     assert frame["protocol"].unique().tolist() == ["Ethereum"]
-    # The fixture is the head and tail of a live series; the last point is whatever it was.
-    assert frame["net_revenue_usd"].iloc[-1] == pytest.approx(75211.0)
+    # float64 always: an int64 column hashes differently and re-vintages every stored row.
+    assert frame["total_fees_usd"].dtype == "float64"
+    # Nothing from the unfinished current day survives parsing (Ruling 37).
+    assert (frame["metric_date"] < pd.Timestamp.now(tz="UTC").normalize()).all()
+
+
+def test_parse_fee_history_drops_the_unfinished_current_day():
+    """A daily aggregate of a day that has not ended is partial, and the vendor's own
+    total24h equals it: ETH read 354,748 mid-day against 404,507 for the day before."""
+    today = pd.Timestamp.now(tz="UTC").normalize()
+    payload = {
+        "name": "X",
+        "totalDataChart": [
+            [int((today - pd.Timedelta(days=2)).timestamp()), 10],
+            [int((today - pd.Timedelta(days=1)).timestamp()), 20],
+            [int(today.timestamp()), 7],
+        ],
+    }
+    frame = parse_fee_history(payload, "total_fees_usd")
+    assert frame["total_fees_usd"].tolist() == [10.0, 20.0]
+    assert frame["metric_date"].max() == today - pd.Timedelta(days=1)
 
 
 def test_trim_leading_zeros_drops_pre_existence_but_keeps_interior_zeros():
@@ -380,9 +396,96 @@ def test_history_source_does_not_call_routine_trims_or_zero_revenue_an_error(
     result = run(*args)
     assert result.errors == ()
     assert result.frame["total_fees_usd"].notna().all()
-    assert result.frame["net_revenue_usd"].isna().all()
+    # Ruling 36: inside the fee span a zero revenue is a MEASUREMENT -- the protocol earned
+    # fees and distributed all of them -- so it stays 0.0 rather than becoming a hole.
+    assert (result.frame["net_revenue_usd"] == 0.0).all()
 
     monkeypatch.setattr("cryptoval.sources.defillama.get_with_retry", serve(zeros, summary))
     result = run(*args)
     assert any("Ethereum/total_fees_usd" in e for e in result.errors)
     assert result.frame["total_fees_usd"].isna().all()
+
+
+def test_revenue_is_trimmed_by_the_fee_series_start_not_its_own():
+    """Ruling 36. ETH earned fees from 2015 and burned nothing until EIP-1559, so 2,190 of
+    its rows were NULL "unknown" when the truth is "holders received none of it"."""
+    dates = pd.date_range("2024-01-01", periods=6, freq="D", tz="UTC")
+    revenue = pd.DataFrame({"protocol": "X", "metric_date": dates, "net_revenue_usd": 0.0})
+    revenue.loc[4:, "net_revenue_usd"] = 7.0
+    # Its own first non-zero value would drop four rows; the fee series began on day 2.
+    own, dropped_own = trim_leading_zeros(revenue, "net_revenue_usd")
+    assert dropped_own == 4
+    by_fees, dropped = trim_leading_zeros(revenue, "net_revenue_usd", start_after=dates[1])
+    assert dropped == 1
+    assert by_fees["net_revenue_usd"].tolist() == [0.0, 0.0, 0.0, 7.0, 7.0]
+
+
+def test_the_history_fetch_asks_for_revenue_with_the_right_data_type(monkeypatch, load_fixture):
+    """The fees fixture used to BE the revenue payload, so one shape served both calls and
+    a swapped dataType was undetectable."""
+    overview = load_fixture("defillama_overview_slugs.json")
+    fees = load_fixture("defillama_summary_fees.json")
+    revenue = load_fixture("defillama_summary_revenue.json")
+    seen: list[dict | None] = []
+
+    def fake_get(client, url, params=None, **kwargs):
+        if "/overview/" in url:
+            return overview
+        seen.append(params)
+        if params and params.get("dataType") == "dailyRevenue":
+            return revenue
+        return fees
+
+    monkeypatch.setattr("cryptoval.sources.defillama.get_with_retry", fake_get)
+    result = DefiLlamaHistorySource().fetch(
+        dt.date(2015, 1, 1), dt.date(2026, 10, 13), [_eth_asset()], None
+    )
+    assert seen == [None, {"dataType": "dailyRevenue"}]
+    last = result.frame.sort_values("metric_date").iloc[-1]
+    # The two series are different quantities and must not arrive equal.
+    assert last["total_fees_usd"] != last["net_revenue_usd"]
+    assert last["total_fees_usd"] == pytest.approx(404507.0)
+    assert last["net_revenue_usd"] == pytest.approx(94003.0)
+
+
+def test_two_identical_history_fetches_change_no_stored_row(monkeypatch, load_fixture):
+    """The revision signal reconcile and as_of_view exist for: an int64/float64 flip in one
+    value column would re-vintage all 27,728 rows and call a dtype a restatement."""
+    overview = load_fixture("defillama_overview_slugs.json")
+    fees = load_fixture("defillama_summary_fees.json")
+    revenue = load_fixture("defillama_summary_revenue.json")
+
+    def fake_get(client, url, params=None, **kwargs):
+        if "/overview/" in url:
+            return overview
+        return revenue if params else fees
+
+    monkeypatch.setattr("cryptoval.sources.defillama.get_with_retry", fake_get)
+    args = (dt.date(2015, 1, 1), dt.date(2026, 10, 13), [_eth_asset()], None)
+    first = DefiLlamaHistorySource().fetch(*args).frame
+    second = DefiLlamaHistorySource().fetch(*args).frame
+    values = ["total_fees_usd", "net_revenue_usd", "methodology_hash"]
+    keys = ["protocol", "metric_date"]
+    stored = merge_scd2(
+        pd.DataFrame(columns=[*keys, *values]),
+        first,
+        keys,
+        values,
+        pd.Timestamp("2026-01-01", tz="UTC"),
+    )
+    again = merge_scd2(stored, second, keys, values, pd.Timestamp("2026-01-02", tz="UTC"))
+    assert len(again) == len(stored)
+    assert int(again["is_current"].sum()) == int(stored["is_current"].sum())
+
+
+def test_one_display_name_mapping_to_two_slugs_is_refused(load_fixture):
+    """Last-wins would address the summary endpoint with another protocol's slug."""
+    overview = load_fixture("defillama_overview_slugs.json")
+    doubled = {
+        "protocols": [
+            *overview["protocols"],
+            {"name": overview["protocols"][0]["name"], "slug": "someone-else"},
+        ]
+    }
+    with pytest.raises(ValueError, match="several slugs"):
+        slug_map(doubled)

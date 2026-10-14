@@ -9,6 +9,7 @@ multiples cannot quietly use the wrong denominator.
 from __future__ import annotations
 
 import datetime as dt
+import urllib.parse
 
 import httpx
 import pandas as pd
@@ -141,11 +142,22 @@ def slug_map(payload: dict) -> dict[str, str]:
     payload, so the mapping is read rather than hand-maintained -- a hand-written slug is
     one rebrand away from a silent 404.
     """
-    return {
-        record["name"]: record["slug"]
-        for record in payload.get("protocols", []) or []
-        if record.get("name") and record.get("slug")
-    }
+    mapping: dict[str, str] = {}
+    duplicates: set[str] = set()
+    for record in payload.get("protocols", []) or []:
+        name, slug = record.get("name"), record.get("slug")
+        if not name or not slug:
+            continue
+        if name in mapping and mapping[name] != slug:
+            # Last-wins would address the summary endpoint with another protocol's slug and
+            # return a confidently wrong series. DefiLlamaSource refuses this too.
+            duplicates.add(name)
+        mapping[name] = slug
+    if duplicates:
+        raise ValueError(
+            f"DefiLlama lists one display name for several slugs: {sorted(duplicates)}"
+        )
+    return mapping
 
 
 def parse_fee_history(payload: dict, column: str) -> pd.DataFrame:
@@ -160,12 +172,27 @@ def parse_fee_history(payload: dict, column: str) -> pd.DataFrame:
     frame = pd.DataFrame(chart, columns=["ts", column])
     frame["metric_date"] = pd.to_datetime(frame["ts"], unit="s", utc=True).dt.normalize()
     frame["protocol"] = payload.get("name")
-    frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    # float64 explicitly: an int64 column hashes "968278" where a float hashes "968278.0",
+    # so one frame arriving without fees would re-vintage every stored row as a change.
+    frame[column] = pd.to_numeric(frame[column], errors="coerce").astype("float64")
+    # The current UTC date is a day that has not ended, so its aggregate is partial -- the
+    # vendor's own total24h equals it mid-day. A partial value entering every trailing mean
+    # is worse than one day less history (Ruling 37); the snapshot source still carries today.
+    today = pd.Timestamp.now(tz="UTC").normalize()
+    frame = frame[frame["metric_date"] < today]
     return frame[["protocol", "metric_date", column]]
 
 
-def trim_leading_zeros(frame: pd.DataFrame, column: str) -> tuple[pd.DataFrame, int]:
+def trim_leading_zeros(
+    frame: pd.DataFrame, column: str, start_after: pd.Timestamp | None = None
+) -> tuple[pd.DataFrame, int]:
     """Drop the pre-existence zeros at the head of a series, keeping interior zeros.
+
+    ``start_after`` trims a series by ANOTHER series' start instead of its own: revenue is
+    trimmed by the day fees began, because once a protocol earns fees a zero revenue is a
+    measurement -- all of it went to suppliers -- and not an absence. Trimming revenue by
+    its own first non-zero value turned 4,519 such rows into NULL and labelled them
+    "unknown", which is the opposite of what the data says (Ruling 36).
 
     DefiLlama's chart starts at the DATASET's start, not the protocol's: Ethereum's
     revenue series opens in August 2015 with zeros. Those are "this protocol did not
@@ -174,6 +201,9 @@ def trim_leading_zeros(frame: pd.DataFrame, column: str) -> tuple[pd.DataFrame, 
     or an adapter outage -- and is kept, because dropping it would silently shorten the
     series that later rows average over.
     """
+    if start_after is not None:
+        keep = frame["metric_date"] >= start_after
+        return frame[keep].reset_index(drop=True), int((~keep).sum())
     values = pd.to_numeric(frame[column], errors="coerce").fillna(0.0)
     nonzero = values.to_numpy().nonzero()[0]
     if len(nonzero) == 0:
@@ -227,13 +257,14 @@ class DefiLlamaHistorySource:
                 continue
             series: dict[str, pd.DataFrame] = {}
             fees_hash = ""
+            fees_start: pd.Timestamp | None = None
             for column, data_type in (
                 ("total_fees_usd", None),
                 ("net_revenue_usd", "dailyRevenue"),
             ):
                 payload = get_with_retry(
                     client,
-                    f"{BASE_URL}{SUMMARY_PATH}/{slug}",
+                    f"{BASE_URL}{SUMMARY_PATH}/{urllib.parse.quote(slug, safe='')}",
                     {"dataType": data_type} if data_type else None,
                     max_retries=self.max_retries,
                 )
@@ -241,11 +272,21 @@ class DefiLlamaHistorySource:
                     fees_hash = methodology_hash(payload)
                 parsed = parse_fee_history(payload, column)
                 rows_in += len(parsed)
-                trimmed, _ = trim_leading_zeros(parsed, column)
+                if column == "net_revenue_usd" and not payload.get("totalDataChart"):
+                    # Fees name an empty chart; revenue used to drop it silently, so a shape
+                    # change on this call was invisible behind the contract's null ceiling.
+                    errors.append(f"{protocol}/{column}: the vendor returned no chart at all")
+                    continue
+                # Revenue is trimmed by the fee series' start (Ruling 36), not its own.
+                trimmed, _ = trim_leading_zeros(
+                    parsed, column, start_after=fees_start if column == "net_revenue_usd" else None
+                )
+                if column == "total_fees_usd" and not trimmed.empty:
+                    fees_start = trimmed["metric_date"].min()
                 if trimmed.empty:
-                    # Fees nobody tracked is a gap worth naming. Revenue that is zero or
-                    # absent is routine (Uniswap V4's fee switch is off), and an `errors`
-                    # entry would make every ingest "partial" forever.
+                    # Fees nobody tracked is a gap worth naming. Revenue that is zero
+                    # throughout is routine (Uniswap V4's fee switch is off), and an
+                    # `errors` entry would make every ingest "partial" forever.
                     if column == "total_fees_usd":
                         errors.append(f"{protocol}/{column}: series is entirely zero or empty")
                     continue
@@ -262,6 +303,9 @@ class DefiLlamaHistorySource:
                     else merged.merge(frame, on=["protocol", "metric_date"], how="outer")
                 )
             merged["methodology_hash"] = fees_hash
+            for column in ("total_fees_usd", "net_revenue_usd"):
+                if column in merged:
+                    merged[column] = merged[column].astype("float64")
             frames.append(merged)
 
         if not frames:

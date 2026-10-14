@@ -58,6 +58,7 @@ KEYS = {
 # applied per entity, never to the pooled frame.
 VOLUME_CHECKS = {
     "defillama": ("protocol", ["total_fees_24h", "net_revenue_24h"]),
+    "defillama_history": ("protocol", ["total_fees_usd", "net_revenue_usd"]),
     "coingecko": ("asset", ["volume_usd"]),
     "coinmetrics": ("asset", ["volume_reported_spot_usd_1d"]),
 }
@@ -114,9 +115,7 @@ def _unmapped_warnings(
     unmapped one they must warn rather than vanish.
     """
     failed = {
-        r.name: r.detail
-        for r in _contract_and_identity_checks(unscoped, contract)
-        if not r.passed
+        r.name: r.detail for r in _contract_and_identity_checks(unscoped, contract) if not r.passed
     }
     if not failed:
         return []
@@ -189,7 +188,9 @@ def run_ingest(
                 write_bronze(settings.resolver, name, end, result.frame, params, record.run_id)
 
                 table, key = SILVER_TABLE[name], KEYS[name]
-                # After bronze (which keeps what the vendor sent) and before the merge (so the
+                # After bronze (the PARSED frame, not the raw payload: it is already rolled
+                # to the display name and trimmed, so changing a trim rule needs a re-fetch)
+                # and before the merge (so the
                 # stored vintage is clean): an impossible cell is nulled and logged, not carried.
                 frame, quarantined = quarantine_impossible(
                     result.frame,
@@ -266,6 +267,27 @@ def _volume_anomaly_warnings(
     return flagged
 
 
+def _stale_entity_warnings(table: str, df: pd.DataFrame, key: str) -> list[str]:
+    """One entity dead while its neighbours keep reporting is invisible to a pooled check.
+
+    Freshness contracts watch the table's own max(metric_date), so a table that is fresh
+    because 18 of 19 protocols still publish says nothing about the 19th. Synthetix V3
+    stopped a month before the rest and `validate` reported nothing at all.
+    """
+    if key not in df.columns or "metric_date" not in df.columns:
+        return []
+    latest = pd.to_datetime(df["metric_date"]).max()
+    per_entity = pd.to_datetime(df.groupby(key)["metric_date"].max())
+    lag = (latest - per_entity).dt.days
+    # Two days, not one: several adapters publish a day behind, which is routine.
+    stale = lag[lag > 2].sort_values(ascending=False)
+    return [
+        f"{table}/stale_entity[{entity}]: last row {int(days)} days behind the table's "
+        f"latest ({latest.date()})"
+        for entity, days in stale.items()
+    ]
+
+
 @dataclasses.dataclass(frozen=True)
 class Validation:
     """Blocking failures and non-blocking warnings, kept apart.
@@ -317,6 +339,8 @@ def run_validate(settings: Settings, assets: list[Asset]) -> Validation:
         if not unscoped.empty:
             warnings.extend(_unmapped_warnings(table, unscoped, key, contract))
 
+        if key and key in scoped.columns:
+            warnings.extend(_stale_entity_warnings(table, scoped, key))
         warnings.extend(_volume_anomaly_warnings(name, table, scoped, contract))
         if not unscoped.empty:
             warnings.extend(

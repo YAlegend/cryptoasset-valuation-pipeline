@@ -14,6 +14,11 @@ with mapped as (
     join {{ ref('assets') }} a
       on list_contains(string_split(a.defillama_slugs, '|'), r.protocol)
     where r.is_current
+      -- Also here, not only at parse time: merge_scd2 does not close a key that vanishes
+      -- from a later fetch, so a partial row captured mid-day on a previous run stays
+      -- `is_current` forever once the parser stops sending it (Ruling 37).
+      and cast(r.metric_date at time zone 'UTC' as date)
+          < cast(current_timestamp at time zone 'UTC' as date)
 )
 select
     symbol,
