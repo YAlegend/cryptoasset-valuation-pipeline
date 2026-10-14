@@ -13,5 +13,11 @@ failure_modes:
   of different size, nor across eras of one asset.
 - A trailing-window standard deviation on a trending series understates dispersion early and
   overstates it after a crash.
+- 'At the default target_z of 0 the fair value IS realized_price''s, to the last digit: the standard
+  deviation reaches only the z_score diagnostic. The two methods are one piece of evidence, and
+  averaging both into a composite double-counts realized cap. Every row says so in derived_from.'
+- The standard deviation is a prior-only rolling sample stdev (ddof=1) over window_rows, not the
+  canonical MVRV Z-score's expanding population stdev, so the z-score is not comparable with
+  published charts.
 assumptions:
 - Market cap reverts toward realized cap, and the trailing window measures the normal spread.

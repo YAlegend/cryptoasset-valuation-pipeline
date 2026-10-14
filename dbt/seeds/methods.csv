@@ -15,7 +15,7 @@ nvt_golden_ratio,D_multiples,market_cap_usd|volume_total_usd|supply,0.6,1095,"Dm
 nvt_reversion,D_multiples,market_cap_usd|volume_total_usd|supply,0.6,365,"Willy Woo / Chris Burniske (2017), NVT ratio; dissertation section 3.6",true
 power_law,F_shelf,price_usd|genesis_date,0.9,730,Santostasi power law; contested - see the 2026 nine-objections paper (spec 10.7),true
 price_to_utility,D_multiples,price_usd|velocity_total|supply,0.6,730,"dissertation section 3.6, price-to-utility ratio",true
-puell_multiple,E_cost,issuance_usd|supply|price_usd,0.9,730,"David Puell (2019), Puell multiple; spec 6.2 derives it from free inputs",true
+puell_multiple,E_cost,issuance_usd|price_usd,0.9,730,"David Puell (2019), Puell multiple; spec 6.2 derives it from free inputs",true
 realized_price,E_cost,realized_cap|supply,0.5,30,"Coinmetrics (2018), realized capitalisation; dissertation section 3.5",true
 stock_to_flow,F_shelf,market_cap_usd|supply|issuance_usd|price_usd,0.9,730,"PlanB (2019), Modeling Bitcoin Value with Scarcity; falsified post-2021",true
 thermocap_floor,E_cost,thermocap_usd|supply,0.5,30,Nick Carter / Coinmetrics thermocap; dissertation section 3.5,true

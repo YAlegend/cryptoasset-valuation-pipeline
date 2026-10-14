@@ -173,20 +173,23 @@ def test_mayer_multiple_is_price_over_its_own_trailing_mean():
     frame = _cost_frame()
     estimates = MayerMultiple().estimate(frame, {"window_rows": 200, "target_multiple": 1.0})
     last = [e for e in estimates if e.applicable][-1]
-    expected_ma = frame["price_usd"].iloc[-200:].mean()
-    assert last.inputs_used["moving_average_price"] == pytest.approx(expected_ma)
+    # The baseline the fair value is built from excludes today (base.py's window rule);
+    # the published multiple keeps the inclusive definition, and both are on the row.
+    prior_ma = frame["price_usd"].iloc[-201:-1].mean()
+    inclusive_ma = frame["price_usd"].iloc[-200:].mean()
+    assert last.inputs_used["moving_average_price"] == pytest.approx(prior_ma)
+    assert last.fair_value == pytest.approx(prior_ma)
     assert last.diagnostics["mayer_multiple"] == pytest.approx(
-        frame["price_usd"].iloc[-1] / expected_ma
+        frame["price_usd"].iloc[-1] / inclusive_ma
     )
-    # target_multiple 1.0 means the fair value IS the moving average.
-    assert last.fair_value == pytest.approx(expected_ma)
+    assert last.diagnostics["baseline_basis"] == "prior_only"
 
 
 def test_puell_multiple_refuses_before_a_full_365_row_window():
     estimates = PuellMultiple().estimate(_cost_frame(days=300), dict(PuellMultiple.spec.params))
     assert all(not e.applicable for e in estimates)
     # The refusal names the measured count and the threshold, not just the threshold.
-    assert estimates[-1].reason == "only 300 issuance observations to date, need 365"
+    assert estimates[-1].reason == "only 299 prior issuance observations to date, need 365"
 
 
 def test_a_refusal_distinguishes_too_short_from_a_gapped_window():
@@ -198,7 +201,7 @@ def test_a_refusal_distinguishes_too_short_from_a_gapped_window():
         == "only 189 price observations in the last 200 rows, need 200 (gaps in the window)"
     )
     short = MayerMultiple().estimate(_cost_frame(days=120), {"window_rows": 200})[-1]
-    assert short.reason == "only 120 price observations to date, need 200"
+    assert short.reason == "only 119 prior price observations to date, need 200"
 
 
 def test_puell_names_which_input_is_missing_today():
@@ -214,9 +217,10 @@ def test_puell_multiple_is_today_over_trailing_mean():
     frame = _cost_frame(days=400)
     frame.loc[399, "issuance_usd"] = 2.0e6
     last = PuellMultiple().estimate(frame, {"window_rows": 365, "target_multiple": 1.0})[-1]
-    mean = frame["issuance_usd"].iloc[-365:].mean()
-    assert last.diagnostics["puell_multiple"] == pytest.approx(2.0e6 / mean)
-    assert last.fair_value == pytest.approx(frame["price_usd"].iloc[-1] * mean / 2.0e6)
+    inclusive_mean = frame["issuance_usd"].iloc[-365:].mean()
+    prior_mean = frame["issuance_usd"].iloc[-366:-1].mean()
+    assert last.diagnostics["puell_multiple"] == pytest.approx(2.0e6 / inclusive_mean)
+    assert last.fair_value == pytest.approx(frame["price_usd"].iloc[-1] * prior_mean / 2.0e6)
 
 
 def test_mvrv_z_score_is_flagged_circular_because_realized_cap_is_derived():
@@ -231,7 +235,7 @@ def test_mvrv_z_score_is_flagged_circular_because_realized_cap_is_derived():
 
 def test_mvrv_z_score_refusal_names_the_measurement():
     out = MvrvZScore().estimate(_cost_frame(days=100), {"window_rows": 365, "target_z": 0.0})
-    assert out[-1].reason == "only 100 market-cap observations to date, need 365"
+    assert out[-1].reason == "only 99 prior market-cap observations to date, need 365"
     flat = _cost_frame(days=400)
     flat["market_cap_usd"] = 5.0e9
     assert MvrvZScore().estimate(flat, {"window_rows": 365})[-1].reason == (
@@ -251,7 +255,7 @@ def test_energy_value_is_exactly_twice_smoothed_hayes():
 
     coins_per_day = frame["issuance_usd"] / frame["price_usd"]
     daily = [
-        hayes_cost_per_coin(1.0e9, 1.0e12, 2.0e-11, 0.05, c) for c in coins_per_day.iloc[-365:]
+        hayes_cost_per_coin(1.0e9, 1.0e12, 2.0e-11, 0.05, c) for c in coins_per_day.iloc[-366:-1]
     ]
     assert last.fair_value == pytest.approx(2.0 * float(np.mean(daily)))
     # The card must not claim independence from Hayes; the diagnostics say so on every row.
@@ -261,4 +265,130 @@ def test_energy_value_is_exactly_twice_smoothed_hayes():
 def test_energy_value_refusal_counts_computable_days():
     params = dict(EnergyValue.spec.params)
     out = EnergyValue().estimate(_cost_frame(days=300), params)
-    assert out[-1].reason == "only 300 computable production-cost observations to date, need 365"
+    assert out[-1].reason == (
+        "only 299 prior computable production-cost observations to date, need 365"
+    )
+
+
+@pytest.mark.parametrize(
+    "method, params",
+    [
+        (MayerMultiple(), {"window_rows": 200}),
+        (PuellMultiple(), {"window_rows": 365}),
+        (MvrvZScore(), {"window_rows": 365, "target_z": 0.0}),
+        (EnergyValue(), dict(EnergyValue.spec.params)),
+    ],
+)
+def test_no_window_method_values_a_row_with_a_later_one(method, params):
+    # The property that matters most, measured per base.py's window rule: shocking the
+    # last row moves no earlier row, and moves no earlier row's inputs either.
+    frame = _cost_frame(days=500)
+    before = [e for e in method.estimate(frame, params) if e.applicable]
+    shocked = frame.copy()
+    for column in ("price_usd", "market_cap_usd", "issuance_usd", "hash_rate"):
+        shocked.loc[shocked.index[-1], column] *= 100.0
+    after = [e for e in method.estimate(shocked, params) if e.applicable]
+    assert len(before) == len(after)
+    for b, a in zip(before[:-1], after[:-1], strict=True):
+        assert b.metric_date == a.metric_date
+        assert a.fair_value == pytest.approx(b.fair_value)
+
+
+def test_the_mayer_baseline_ignores_its_own_day():
+    # Mayer's fair value is compared against today's price, so today's price must not be
+    # inside it. Shocking the last price moves the multiple, never the baseline.
+    frame = _cost_frame(days=500)
+    params = {"window_rows": 200, "target_multiple": 1.0}
+    before = [e for e in MayerMultiple().estimate(frame, params) if e.applicable][-1]
+    shocked = frame.copy()
+    shocked.loc[shocked.index[-1], "price_usd"] *= 100.0
+    after = [e for e in MayerMultiple().estimate(shocked, params) if e.applicable][-1]
+    assert after.fair_value == pytest.approx(before.fair_value)
+    assert after.diagnostics["mayer_multiple"] > before.diagnostics["mayer_multiple"]
+
+
+def test_the_puell_baseline_ignores_its_own_day():
+    frame = _cost_frame(days=500)
+    params = {"window_rows": 365, "target_multiple": 1.0}
+    before = [e for e in PuellMultiple().estimate(frame, params) if e.applicable][-1]
+    shocked = frame.copy()
+    shocked.loc[shocked.index[-1], "issuance_usd"] *= 100.0
+    after = [e for e in PuellMultiple().estimate(shocked, params) if e.applicable][-1]
+    assert after.inputs_used["trailing_mean_issuance_usd"] == pytest.approx(
+        before.inputs_used["trailing_mean_issuance_usd"]
+    )
+
+
+def test_the_window_boundary_is_exact_once_today_is_excluded():
+    # window prior observations are needed, so a frame of exactly `window` rows has none.
+    params = {"window_rows": 200, "target_multiple": 1.0}
+    assert not any(e.applicable for e in MayerMultiple().estimate(_cost_frame(days=200), params))
+    first = [e for e in MayerMultiple().estimate(_cost_frame(days=201), params) if e.applicable]
+    assert len(first) == 1
+
+
+def test_the_vendor_lagged_newest_day_still_gets_an_estimate():
+    # Consequence of the prior-only baseline, and an improvement: the newest panel row has
+    # no price yet (the vendor lags a day) but a baseline built from prior rows exists, so
+    # the method answers instead of refusing. Only the inclusive multiple is unavailable.
+    frame = _cost_frame(days=400)
+    frame.loc[399, "price_usd"] = np.nan
+    last = MayerMultiple().estimate(frame, {"window_rows": 200})[-1]
+    assert last.applicable and last.fair_value > 0
+    assert last.diagnostics["mayer_multiple"] is None
+
+
+def test_an_infinity_is_not_counted_as_an_observation():
+    frame = _cost_frame(days=400)
+    frame.loc[380, "price_usd"] = np.inf
+    last = MayerMultiple().estimate(frame, {"window_rows": 200})[-1]
+    assert last.reason == (
+        "only 199 price observations in the last 200 rows, need 200 (gaps in the window)"
+    )
+
+
+def test_energy_value_shares_hayes_own_parameters():
+    # The card claims "the same fleet efficiency and electricity price". Nothing enforced it.
+    hayes = dict(HayesCostOfProduction.spec.params)
+    energy = dict(EnergyValue.spec.params)
+    for key in ("hashes_per_unit", "joules_per_hash", "electricity_usd_per_kwh"):
+        assert energy[key] == hayes[key], key
+
+
+def test_both_hash_rate_methods_name_the_hardware_they_were_calibrated_for():
+    # Ruling 16: the parameters describe SHA-256 hardware, so a Scrypt asset's number is
+    # wrong by orders of magnitude rather than slightly off, and the row has to say so.
+    frame = _cost_frame()
+    hayes = [
+        e
+        for e in HayesCostOfProduction().estimate(frame, dict(HayesCostOfProduction.spec.params))
+        if e.applicable
+    ][-1]
+    energy = [
+        e for e in EnergyValue().estimate(frame, dict(EnergyValue.spec.params)) if e.applicable
+    ][-1]
+    assert hayes.diagnostics["parameters_calibrated_for"].startswith("sha256")
+    assert energy.diagnostics["parameters_calibrated_for"].startswith("sha256")
+
+
+def test_mvrv_z_at_target_zero_declares_that_it_is_realized_price():
+    frame = _cost_frame()
+    z = [
+        e
+        for e in MvrvZScore().estimate(frame, {"window_rows": 365, "target_z": 0.0})
+        if e.applicable
+    ][-1]
+    realized = [
+        e for e in RealizedPrice().estimate(frame, dict(RealizedPrice.spec.params)) if e.applicable
+    ][-1]
+    assert z.fair_value == pytest.approx(realized.fair_value)
+    assert z.diagnostics["derived_from"] == "realized_price"
+    # At a non-zero target the standard deviation does reach the fair value, so the
+    # duplication claim would be false and the row must not make it.
+    shifted = [
+        e
+        for e in MvrvZScore().estimate(frame, {"window_rows": 365, "target_z": -0.5})
+        if e.applicable
+    ][-1]
+    assert shifted.diagnostics["derived_from"] is None
+    assert shifted.fair_value < realized.fair_value

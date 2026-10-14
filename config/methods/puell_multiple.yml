@@ -1,6 +1,6 @@
 method_id: puell_multiple
 family: E_cost
-requires: [issuance_usd, supply, price_usd]
+requires: [issuance_usd, price_usd]
 min_density: 0.9
 min_rows: 730
 params: {window_rows: 365, target_multiple: 1.0}

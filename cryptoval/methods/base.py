@@ -14,6 +14,14 @@ restated eleven times is a property forgotten once:
   price: QTM with panel velocity reduces to price/circulating_fraction, and every residual
   is zero by construction. The flag travels into the method card and the report so such a
   number is never presented as independent evidence (spec 14, "method circularity").
+
+One rule every windowed method follows, settled once here so that eleven methods do not
+each decide it: ANY window that feeds a fair value is PRIOR-ONLY -- ``shift(1)`` before
+the rolling call -- because a row valued with its own observation leaks one day of the
+thing the estimate is meant to be judged against, and Plan 4's out-of-sample tests would
+then be scoring a leak. A window may be inclusive only where it feeds a PUBLISHED
+DIAGNOSTIC whose definition is inclusive (the Mayer and Puell multiples are), and the row
+then names both bases in its diagnostics.
 """
 
 from __future__ import annotations

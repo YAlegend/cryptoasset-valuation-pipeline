@@ -15,6 +15,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from cryptoval.methods.base import Estimate, MethodSpec
@@ -22,6 +23,10 @@ from cryptoval.methods.monetary import _refuse
 from cryptoval.methods.registry import load_method_specs, param_set_hash, register
 
 _SPECS = load_method_specs()
+
+# Named on every row that uses hayes_cost_per_coin: the hardware and vendor unit these
+# parameters were measured against. Anything else is out of calibration, not approximate.
+PARAMETER_CALIBRATION = "sha256_asic_fleet_coinmetrics_hashrate_unit"
 
 
 def _finite(value: Any) -> float | None:
@@ -309,6 +314,11 @@ class HayesCostOfProduction:
                         # Hayes is a FLOOR argument, not a fair value: miners exit below
                         # cost, which constrains price from beneath.
                         "interpretation": "marginal production cost, a floor rather than a target",
+                        # Ruling 16: these parameters describe SHA-256 hardware and the unit
+                        # Coin Metrics reports for it. On a Scrypt asset (LTC, DOGE) both the
+                        # unit and the energy per hash differ, and the output is wrong by
+                        # orders of magnitude rather than slightly off.
+                        "parameters_calibrated_for": PARAMETER_CALIBRATION,
                         "price_to_cost": (price / cost) if price and cost else None,
                     },
                     applicable=True,
@@ -319,15 +329,22 @@ class HayesCostOfProduction:
 
 
 def _window_stats(series: pd.Series, window: int) -> tuple[pd.Series, pd.Series]:
-    """Observations to date and observations inside the trailing window, per row."""
-    seen = series.notna()
+    """Observations to date and observations inside the trailing window, per row.
+
+    isfinite, not notna: an inf passes a null check and then poisons the mean, which
+    produced the self-contradictory "only 200 observations in the last 200 rows".
+    """
+    seen = pd.Series(
+        np.isfinite(pd.to_numeric(series, errors="coerce").to_numpy(dtype="float64")),
+        index=series.index,
+    )
     return seen.cumsum(), seen.rolling(window, min_periods=1).sum()
 
 
 def _short_window_reason(what: str, to_date: float, in_window: float, window: int) -> str:
     """A refusal that names its measurement, and which of two causes produced it."""
     if to_date < window:
-        return f"only {int(to_date)} {what} observations to date, need {window}"
+        return f"only {int(to_date)} prior {what} observations to date, need {window}"
     return (
         f"only {int(in_window)} {what} observations in the last {window} rows, need {window} "
         "(gaps in the window)"
@@ -343,16 +360,25 @@ class MayerMultiple:
         target = float(params.get("target_multiple", 1.0))
         phash = param_set_hash(params)
         price = pd.to_numeric(frame["price_usd"], errors="coerce")
-        moving = price.rolling(window, min_periods=window).mean()
-        to_date, in_window = _window_stats(price, window)
+        # shift(1): today's own price must not enter the average today's price is judged
+        # against, or the signal leaks one day of the thing it is meant to predict.
+        moving = price.shift(1).rolling(window, min_periods=window).mean()
+        # The published multiple keeps the spec's inclusive definition; only the fair
+        # value is prior-only, and both bases are named on the row.
+        inclusive = price.rolling(window, min_periods=window).mean()
+        to_date, in_window = _window_stats(price.shift(1), window)
 
         out: list[Estimate] = []
         for position, row in enumerate(frame.itertuples(index=False)):
             average = _finite(moving.iloc[position])
+            inclusive_mean = _finite(inclusive.iloc[position])
             today = _finite(row.price_usd)
             if average is None:
                 reason = _short_window_reason(
-                    "price", to_date.iloc[position], in_window.iloc[position], window
+                    "price",
+                    to_date.iloc[position],
+                    in_window.iloc[position],
+                    window,
                 )
                 out.append(_refuse(self.spec, row, params, reason))
                 continue
@@ -374,7 +400,11 @@ class MayerMultiple:
                         "target_multiple": target,
                     },
                     diagnostics={
-                        "mayer_multiple": (today / average) if today else None,
+                        "mayer_multiple": (today / inclusive_mean)
+                        if today and inclusive_mean
+                        else None,
+                        "mayer_multiple_basis": "inclusive_window, the published definition",
+                        "baseline_basis": "prior_only",
                         "status": "diagnostic_not_fair_value",
                     },
                     applicable=True,
@@ -393,17 +423,24 @@ class PuellMultiple:
         target = float(params.get("target_multiple", 1.0))
         phash = param_set_hash(params)
         issuance = pd.to_numeric(frame["issuance_usd"], errors="coerce")
-        average = issuance.rolling(window, min_periods=window).mean()
-        to_date, in_window = _window_stats(issuance, window)
+        # shift(1): see MayerMultiple. Today's issuance is the numerator of the multiple,
+        # so it cannot also sit inside the average that sets the denominator.
+        average = issuance.shift(1).rolling(window, min_periods=window).mean()
+        inclusive = issuance.rolling(window, min_periods=window).mean()
+        to_date, in_window = _window_stats(issuance.shift(1), window)
 
         out: list[Estimate] = []
         for position, row in enumerate(frame.itertuples(index=False)):
             baseline = _finite(average.iloc[position])
+            inclusive_mean = _finite(inclusive.iloc[position])
             today_issuance = _finite(row.issuance_usd)
             price, supply = _finite(row.price_usd), _finite(row.supply)
             if baseline is None:
                 reason = _short_window_reason(
-                    "issuance", to_date.iloc[position], in_window.iloc[position], window
+                    "issuance",
+                    to_date.iloc[position],
+                    in_window.iloc[position],
+                    window,
                 )
                 out.append(_refuse(self.spec, row, params, reason))
                 continue
@@ -445,7 +482,11 @@ class PuellMultiple:
                         "supply": supply,
                     },
                     diagnostics={
-                        "puell_multiple": today_issuance / baseline,
+                        "puell_multiple": (today_issuance / inclusive_mean)
+                        if inclusive_mean
+                        else None,
+                        "puell_multiple_basis": "inclusive_window, the published definition",
+                        "baseline_basis": "prior_only",
                         "status": "diagnostic_not_fair_value",
                     },
                     applicable=True,
@@ -465,8 +506,10 @@ class MvrvZScore:
         phash = param_set_hash(params)
         market_cap = pd.to_numeric(frame["market_cap_usd"], errors="coerce")
         realized = pd.to_numeric(frame["realized_cap"], errors="coerce")
-        deviation = market_cap.rolling(window, min_periods=window).std()
-        to_date, in_window = _window_stats(market_cap, window)
+        # shift(1) for the same reason as Mayer; ddof=1 (pandas' default) over a rolling
+        # window, which is NOT the canonical expanding population sigma -- named on the row.
+        deviation = market_cap.shift(1).rolling(window, min_periods=window).std()
+        to_date, in_window = _window_stats(market_cap.shift(1), window)
 
         out: list[Estimate] = []
         for position, row in enumerate(frame.itertuples(index=False)):
@@ -478,7 +521,10 @@ class MvrvZScore:
             )
             if sigma is None:
                 reason = _short_window_reason(
-                    "market-cap", to_date.iloc[position], in_window.iloc[position], window
+                    "market-cap",
+                    to_date.iloc[position],
+                    in_window.iloc[position],
+                    window,
                 )
                 out.append(_refuse(self.spec, row, params, reason))
                 continue
@@ -516,6 +562,11 @@ class MvrvZScore:
                     },
                     diagnostics={
                         "z_score": (cap - real) / sigma,
+                        "sigma_basis": "prior_only_rolling_sample_stdev_ddof1",
+                        # At target_z = 0 the fair value IS realized_price's, to the last
+                        # digit: only z_score is new information. A composite that averages
+                        # both double-counts realized cap.
+                        "derived_from": "realized_price" if target_z == 0.0 else None,
                         "status": "circular_realized_cap",
                     },
                     applicable=True,
@@ -555,8 +606,8 @@ class EnergyValue:
             index=frame.index,
             dtype="float64",
         )
-        smoothed = daily_cost.rolling(window, min_periods=window).mean()
-        to_date, in_window = _window_stats(daily_cost, window)
+        smoothed = daily_cost.shift(1).rolling(window, min_periods=window).mean()
+        to_date, in_window = _window_stats(daily_cost.shift(1), window)
 
         out: list[Estimate] = []
         for position, row in enumerate(frame.itertuples(index=False)):
@@ -584,10 +635,12 @@ class EnergyValue:
                         "window_rows": window,
                         "joules_per_hash": params["joules_per_hash"],
                         "electricity_usd_per_kwh": params["electricity_usd_per_kwh"],
+                        "hashes_per_unit": float(params["hashes_per_unit"]),
                     },
                     diagnostics={
                         "derived_from": "hayes_cost_of_production",
                         "multiplier": 2.0,
+                        "parameters_calibrated_for": PARAMETER_CALIBRATION,
                         "status": "not_independent_of_hayes",
                     },
                     applicable=True,
