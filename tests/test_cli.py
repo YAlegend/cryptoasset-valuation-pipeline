@@ -748,3 +748,120 @@ def test_main_rejects_an_unknown_method_id(tmp_path, monkeypatch):
         cli, "load_config", lambda: (Settings(data_root=str(tmp_path)), [Asset(symbol="BTC")])
     )
     assert main(["estimate", "--methods", "no_such_method"]) == 2
+
+
+def _widen_fixtures():
+    panel = pd.DataFrame(
+        {
+            "symbol": ["ETH", "ETH", "BTC"],
+            "metric_date": pd.to_datetime(["2026-10-11", "2026-10-12", "2026-10-12"]).date,
+            "price_usd": [2500.0, 2550.0, 80000.0],
+        }
+    )
+    revenue = pd.DataFrame(
+        {
+            "symbol": ["ETH"],
+            "metric_date": pd.to_datetime(["2026-10-12"]).date,
+            "total_fees_usd": [1.0e6],
+            "net_revenue_usd": [9.0e5],
+            "revenue_regime": ["retains_revenue"],
+            "protocol_count": [1],
+        }
+    )
+    tvl = pd.DataFrame(
+        {
+            "symbol": ["ETH"],
+            "metric_date": pd.to_datetime(["2026-10-12"]).date,
+            "tvl_usd": [5.0e10],
+        }
+    )
+    assets = pd.DataFrame(
+        {
+            "symbol": ["ETH", "BTC"],
+            "sector": ["smart_contract_l1", "pow_monetary"],
+            "total_supply": [1.2e8, 1.98e7],
+            "max_supply": [None, 2.1e7],
+            "supply_as_of": pd.to_datetime(["2026-10-13", "2026-10-13"]).date,
+            "genesis_date": pd.to_datetime(["2015-07-30", "2009-01-03"]).date,
+        }
+    )
+    return panel, revenue, tvl, assets
+
+
+def test_widen_panel_left_joins_without_changing_the_row_count():
+    panel, revenue, tvl, assets = _widen_fixtures()
+    wide = cli._widen_panel(panel, revenue, tvl, assets)
+
+    # The asset panel's grain is sacred: three rows in, three rows out.
+    assert len(wide) == 3
+    eth_12 = wide.set_index(["symbol", "metric_date"]).loc[("ETH", panel["metric_date"].iloc[1])]
+    assert eth_12["net_revenue_usd"] == 9.0e5
+    assert eth_12["tvl_usd"] == 5.0e10
+    # BTC has no protocol revenue, and ETH's own 10-11 row predates it: null, not zero.
+    assert pd.isna(wide.loc[wide["symbol"] == "BTC", "net_revenue_usd"]).all()
+    assert pd.isna(wide.loc[wide["metric_date"] == panel["metric_date"].iloc[0], "tvl_usd"]).all()
+    # BTC's max supply survives the join; ETH's null stays null.
+    assert wide.loc[wide["symbol"] == "BTC", "max_supply"].iloc[0] == 2.1e7
+    assert pd.isna(wide.loc[wide["symbol"] == "ETH", "max_supply"]).all()
+
+
+def test_widen_panel_refuses_a_duplicated_join_key_rather_than_fanning_out():
+    panel, revenue, tvl, assets = _widen_fixtures()
+    doubled = pd.concat([revenue, revenue], ignore_index=True)
+    with pytest.raises(ValueError, match="duplicate"):
+        cli._widen_panel(panel, doubled, tvl, assets)
+
+
+def test_widen_panel_refuses_a_column_that_would_be_suffixed_away():
+    """Both protocol marts carry protocol_count and composition_complete. A merge would
+    land them as _x/_y and a method naming the column in `requires` would find neither."""
+    panel, revenue, tvl, assets = _widen_fixtures()
+    tvl = tvl.assign(protocol_count=1)
+    with pytest.raises(ValueError, match="collide"):
+        cli._widen_panel(panel, revenue, tvl, assets)
+
+
+def test_widen_panel_survives_a_mart_that_does_not_exist_yet():
+    panel, revenue, tvl, assets = _widen_fixtures()
+    empty = pd.DataFrame(columns=["symbol", "metric_date", "tvl_usd"])
+    wide = cli._widen_panel(panel, revenue, empty, assets)
+    assert len(wide) == 3
+    assert "tvl_usd" not in wide.columns
+
+
+def test_read_panel_widens_against_the_real_marts(tmp_path, monkeypatch):
+    """The column list is a contract Tasks 8-10 name in `requires`: pin it against the
+    marts themselves, because a renamed mart column is otherwise a silent refusal."""
+    import duckdb
+
+    db = tmp_path / "cryptoval.duckdb"
+    con = duckdb.connect(str(db))
+    con.execute(
+        "create table fct_asset_metrics_daily as select 'ETH' as symbol, "
+        "date '2026-10-12' as metric_date, 2550.0 as price_usd"
+    )
+    con.execute(
+        "create table fct_protocol_revenue_daily as select 'ETH' as symbol, "
+        "date '2026-10-12' as metric_date, 1.0e6 as total_fees_usd, 9.0e5 as net_revenue_usd, "
+        "'retains_revenue' as revenue_regime, 1 as protocol_count, 1 as protocol_count_prior_day"
+    )
+    con.execute(
+        "create table fct_protocol_tvl_daily as select 'ETH' as symbol, "
+        "date '2026-10-12' as metric_date, 5.0e10 as tvl_usd, 1 as protocol_count"
+    )
+    con.execute(
+        "create table dim_asset as select 'ETH' as symbol, 'smart_contract_l1' as sector, "
+        "1.2e8 as total_supply, cast(null as double) as max_supply, "
+        "date '2026-10-13' as supply_as_of, date '2015-07-30' as genesis_date, 'eth' as cm_id"
+    )
+    con.close()
+
+    wide = cli._read_panel(Settings(data_root=str(tmp_path)))
+    assert len(wide) == 1
+    for column in ("total_fees_usd", "net_revenue_usd", "revenue_regime", "protocol_count",
+                   "tvl_usd", "total_supply", "max_supply", "supply_as_of", "sector",
+                   "genesis_date"):
+        assert column in wide.columns, column
+    # protocol_count came from the revenue mart alone; the TVL mart's copy is not selected.
+    assert "protocol_count_x" not in wide.columns
+    assert "cm_id" not in wide.columns

@@ -365,13 +365,96 @@ def run_validate(settings: Settings, assets: list[Asset]) -> Validation:
     return Validation(failures, warnings)
 
 
+# What _read_panel pulls from each mart beyond the asset panel. Explicit, not `select *`:
+# fct_protocol_revenue_daily and fct_protocol_tvl_daily both carry protocol_count and
+# composition_complete, and a `*` would silently land them as protocol_count_x/_y, where a
+# method naming protocol_count in `requires` would find nothing and refuse for the wrong
+# reason. Adding a column here that collides raises instead -- see _widen_panel.
+PANEL_REVENUE_COLUMNS = [
+    "symbol",
+    "metric_date",
+    "total_fees_usd",
+    "net_revenue_usd",
+    "revenue_regime",
+    "protocol_count",
+]
+PANEL_TVL_COLUMNS = ["symbol", "metric_date", "tvl_usd"]
+PANEL_ASSET_COLUMNS = [
+    "symbol",
+    "sector",
+    "total_supply",
+    "max_supply",
+    "supply_as_of",
+    "genesis_date",
+]
+
+
+def _widen_panel(
+    panel: pd.DataFrame,
+    revenue: pd.DataFrame,
+    tvl: pd.DataFrame,
+    assets: pd.DataFrame,
+) -> pd.DataFrame:
+    """The asset panel plus the protocol, TVL and dimension columns, LEFT joined.
+
+    One place, so a method reaches a new column by naming it in ``requires`` and the method
+    contract does not grow a second shape. LEFT, so an asset with no protocol revenue keeps
+    its row and its Family A estimates: a missing denominator is the registry's refusal to
+    make, not this function's.
+
+    A duplicated join key RAISES rather than fanning out. A silent fan-out would multiply
+    every estimate for that symbol-date, and a doubled QTM estimate looks exactly like a
+    real one.
+    """
+
+    def _join(wide: pd.DataFrame, frame: pd.DataFrame, keys: list[str], name: str):
+        if frame.empty:
+            return wide
+        duplicated = int(frame.duplicated(subset=keys).sum())
+        if duplicated:
+            raise ValueError(
+                f"{name} has {duplicated} duplicate {tuple(keys)} row(s); joining it would "
+                f"fan out the panel and double-count every estimate for those days"
+            )
+        # pandas would suffix a shared non-key column to _x/_y and the method asking for it
+        # by name would quietly find neither.
+        collisions = sorted((set(wide.columns) & set(frame.columns)) - set(keys))
+        if collisions:
+            raise ValueError(
+                f"{name} would collide with the panel on {collisions}; rename the column in "
+                f"the select list rather than letting the merge suffix it"
+            )
+        return wide.merge(frame, on=keys, how="left")
+
+    wide = _join(panel.copy(), revenue, ["symbol", "metric_date"], "protocol revenue")
+    wide = _join(wide, tvl, ["symbol", "metric_date"], "protocol TVL")
+    return _join(wide, assets, ["symbol"], "dim_asset")
+
+
 def _read_panel(settings: Settings) -> pd.DataFrame:
-    """The conformed panel, read from the mart DuckDB built."""
+    """The conformed panel every method reads, widened with the Family C inputs."""
     import duckdb
 
     con = duckdb.connect(str(pathlib.Path(settings.data_root) / "cryptoval.duckdb"), read_only=True)
     try:
-        return con.execute("select * from fct_asset_metrics_daily").fetchdf()
+
+        def maybe(table: str, columns: list[str]) -> pd.DataFrame:
+            # A mart that does not exist yet yields an empty frame, and the methods
+            # requiring its columns refuse with a measurement rather than crashing the run.
+            # CatalogException only: a mart that exists but has RENAMED a column raises
+            # BinderException, and that must crash. Swallowing it would hand every
+            # dependent method an absent column and dress a schema change up as a refusal.
+            try:
+                return con.execute(f"select {', '.join(columns)} from {table}").fetchdf()
+            except duckdb.CatalogException:
+                return pd.DataFrame(columns=columns)
+
+        return _widen_panel(
+            con.execute("select * from fct_asset_metrics_daily").fetchdf(),
+            maybe("fct_protocol_revenue_daily", PANEL_REVENUE_COLUMNS),
+            maybe("fct_protocol_tvl_daily", PANEL_TVL_COLUMNS),
+            maybe("dim_asset", PANEL_ASSET_COLUMNS),
+        )
     finally:
         con.close()
 
