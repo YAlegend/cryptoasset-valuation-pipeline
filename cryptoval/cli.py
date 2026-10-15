@@ -26,13 +26,18 @@ from cryptoval.methods.registry import METHODS, run_methods
 from cryptoval.quarantine import QUARANTINE_COLUMNS, quarantine_impossible
 from cryptoval.scd2 import current_view, merge_scd2, reconcile_report
 from cryptoval.sources.coinmetrics import CoinMetricsSource
-from cryptoval.sources.defillama import DefiLlamaHistorySource, DefiLlamaSource
+from cryptoval.sources.defillama import (
+    DefiLlamaHistorySource,
+    DefiLlamaSource,
+    DefiLlamaTvlSource,
+)
 from cryptoval.sources.prices import CoinGeckoSource, CoinGeckoSupplySource, EquitySource
 
 SOURCES = {
     "coinmetrics": CoinMetricsSource(),
     "defillama": DefiLlamaSource(),
     "defillama_history": DefiLlamaHistorySource(),
+    "defillama_tvl": DefiLlamaTvlSource(),
     "coingecko": CoinGeckoSource(),
     "coingecko_supply": CoinGeckoSupplySource(),
     "equities": EquitySource(),
@@ -42,6 +47,7 @@ SILVER_TABLE = {
     "coinmetrics": "asset_metrics",
     "defillama": "protocol_revenue",
     "defillama_history": "protocol_fee_history",
+    "defillama_tvl": "protocol_tvl",
     "coingecko": "market_chart",
     "coingecko_supply": "supply_metadata",
     "equities": "equity_prices",
@@ -51,6 +57,7 @@ KEYS = {
     "coinmetrics": ["asset", "metric_date"],
     "defillama": ["protocol", "metric_date"],
     "defillama_history": ["protocol", "metric_date"],
+    "defillama_tvl": ["protocol", "metric_date"],
     "coingecko": ["asset", "metric_date"],
     "coingecko_supply": ["gecko_id"],
     "equities": ["asset", "metric_date"],
@@ -74,6 +81,7 @@ VOLUME_CHECKS = {
 SCOPE_KEY = {
     "defillama": "protocol",
     "defillama_history": "protocol",
+    "defillama_tvl": "protocol",
     "coinmetrics": "asset",
     "coingecko": "asset",
     "coingecko_supply": "gecko_id",
@@ -82,6 +90,7 @@ SCOPED_SOURCES = set(SCOPE_KEY)
 _SCOPE_LABEL = {
     "defillama": "defillama_slugs",
     "defillama_history": "defillama_slugs",
+    "defillama_tvl": "defillama_slugs",
     "coinmetrics": "cm_id/metric_sources",
     "coingecko": "gecko_id",
     "coingecko_supply": "gecko_id",
@@ -94,6 +103,7 @@ def _universe(assets: list[Asset]) -> dict[str, set[str]]:
     return {
         "defillama": {slug for a in assets for slug in a.defillama_slugs},
         "defillama_history": {slug for a in assets for slug in a.defillama_slugs},
+        "defillama_tvl": {slug for a in assets for slug in a.defillama_slugs},
         "coinmetrics": {i for a in assets for i in a.cm_ids},
         "coingecko": {a.gecko_id for a in assets if a.gecko_id},
         "coingecko_supply": {a.gecko_id for a in assets if a.gecko_id},

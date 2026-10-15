@@ -1,0 +1,46 @@
+{
+ "name": "Aave V3",
+ "slug": null,
+ "tvl": [
+  {
+   "date": 1791331200,
+   "totalLiquidityUSD": 18429247796
+  },
+  {
+   "date": 1791417600,
+   "totalLiquidityUSD": 17690727676
+  },
+  {
+   "date": 1791504000,
+   "totalLiquidityUSD": 17091341851
+  },
+  {
+   "date": 1791590400,
+   "totalLiquidityUSD": 17302371707
+  },
+  {
+   "date": 1791676800,
+   "totalLiquidityUSD": 17419438726
+  },
+  {
+   "date": 1791763200,
+   "totalLiquidityUSD": 17629202553
+  },
+  {
+   "date": 1791849600,
+   "totalLiquidityUSD": 17059217442
+  },
+  {
+   "date": 1791936000,
+   "totalLiquidityUSD": 17359998208
+  },
+  {
+   "date": 1792022400,
+   "totalLiquidityUSD": 17058643590
+  },
+  {
+   "date": 1792036943,
+   "totalLiquidityUSD": 16711434202
+  }
+ ]
+}

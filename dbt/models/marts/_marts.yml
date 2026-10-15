@@ -274,3 +274,39 @@ models:
     columns:
       - name: symbol
         tests: [not_null]
+
+  - name: stg_protocol_tvl
+    description: >
+      DefiLlama per-protocol daily TVL rolled up to symbol across the configured slug list.
+      One row per (symbol, metric_date); the current UTC date is absent.
+    columns:
+      - name: symbol
+        tests: [not_null]
+      - name: tvl_usd
+        description: >
+          Sum of the symbol's configured components' TVL for the day, USD. NULL when no
+          component reported, never 0.0 by aggregation.
+
+  - name: fct_protocol_tvl_daily
+    description: >
+      Total value locked at the valuation grain (symbol, metric_date); only assets mapped
+      to a DefiLlama slug appear. The denominator for P/TVL. The rollup adds a symbol's own
+      protocols, which is addition of balances; it does NOT reconcile across symbols, where
+      the same dollar is counted twice (ETH's chain TVL contains the Aave pools counted
+      under AAVE), so a cross-asset sum of this column is not a market total. The current
+      UTC date is absent: the vendor serves both today's 00:00 point and a live one.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [symbol, metric_date]
+    columns:
+      - name: tvl_usd
+        description: >
+          Balance at the end of the day, USD. Read it with composition_complete: a day that
+          lost a component reads lower for a composition reason, not an economic one.
+      - name: protocol_count
+        description: How many configured components reported that day.
+      - name: composition_complete
+        description: >
+          False marks a day that lost a component against the day before. A P/TVL built on
+          such a day moves for a reason that is not about the protocol.

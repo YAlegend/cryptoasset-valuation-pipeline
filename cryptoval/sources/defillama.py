@@ -9,6 +9,7 @@ multiples cannot quietly use the wrong denominator.
 from __future__ import annotations
 
 import datetime as dt
+import json
 import urllib.parse
 
 import httpx
@@ -312,3 +313,98 @@ class DefiLlamaHistorySource:
             return FetchResult(pd.DataFrame(columns=HISTORY_COLUMNS), rows_in, tuple(errors))
         combined = pd.concat(frames, ignore_index=True).reindex(columns=HISTORY_COLUMNS)
         return FetchResult(combined, rows_in, tuple(errors))
+
+
+PROTOCOL_PATH = "/protocol"
+TVL_COLUMNS = ["protocol", "metric_date", "tvl_usd"]
+
+
+def parse_tvl_history(payload: dict) -> pd.DataFrame:
+    """One protocol's daily TVL from a /protocol/{slug} response.
+
+    No leading-zero trim, unlike the fee series: DefiLlama's tvl array starts at the
+    PROTOCOL's first day (aave-v3 opens 2022-03-14 at $6), not at the dataset's, so a
+    small early value is a measurement of a young pool rather than a pre-existence pad.
+    """
+    rows = payload.get("tvl") or []
+    if not rows:
+        return pd.DataFrame(columns=TVL_COLUMNS)
+    frame = pd.DataFrame(rows)
+    frame["metric_date"] = pd.to_datetime(frame["date"], unit="s", utc=True).dt.normalize()
+    # float64 explicitly: the vendor sends an int for a small TVL ($6 on aave-v3's first
+    # day), and an int64 column hashes "6" where a float hashes "6.0", re-vintaging every
+    # stored row the first time one protocol's history starts small (Ruling 42).
+    frame["tvl_usd"] = pd.to_numeric(frame["totalLiquidityUSD"], errors="coerce").astype("float64")
+    frame["protocol"] = payload.get("name")
+    # The array carries BOTH today's 00:00 point and a live "now" point, which normalize to
+    # one date: measured 2026-10-15, aave-v3's tail is 10-14 00:00, 10-15 00:00, 10-15
+    # 04:02. Keeping today would break the (protocol, metric_date) uniqueness contract on
+    # every ingest, and would restate the row on every run of the same day.
+    today = pd.Timestamp.now(tz="UTC").normalize()
+    frame = frame[frame["metric_date"] < today]
+    return frame[TVL_COLUMNS]
+
+
+class DefiLlamaTvlSource:
+    """Protocol TVL history, with a payload-size guard.
+
+    /protocol/<slug> carries per-chain and per-token breakdowns we do not use and offers no
+    way to exclude them: measured 2026-10-15 over the 19 configured protocols, the
+    endpoint serves 167 MB uncompressed (~56 MB on the wire, gzipped) for the tvl arrays we
+    keep, with curve-dex alone at 66.9 MB and aave-v3 at 28.9 MB. The guard exists so a
+    vendor payload that grows by an order of magnitude fails loudly with the measured size
+    rather than quietly consuming the run; the default sits well above curve-dex, because a
+    guard that refuses a protocol we have measured drops its series in an `errors` line.
+    """
+
+    name = "defillama_tvl"
+    contract_path = "config/contracts/defillama_tvl.yml"
+
+    def __init__(self, max_retries: int = 5, max_payload_mb: float = 128.0) -> None:
+        self.max_retries = max_retries
+        self.max_payload_mb = max_payload_mb
+
+    def fetch(
+        self,
+        start: dt.date,
+        end: dt.date,
+        assets: list[Asset],
+        client: httpx.Client,
+    ) -> FetchResult:
+        overview = get_with_retry(
+            client, f"{BASE_URL}{OVERVIEW_PATH}", max_retries=self.max_retries
+        )
+        slugs = slug_map(overview)
+        wanted = sorted({slug for asset in assets for slug in asset.defillama_slugs or []})
+
+        frames: list[pd.DataFrame] = []
+        errors: list[str] = []
+        rows_in = 0
+        for protocol in wanted:
+            slug = slugs.get(protocol)
+            if slug is None:
+                errors.append(f"no DefiLlama slug for configured protocol {protocol!r}")
+                continue
+            payload = get_with_retry(
+                client,
+                f"{BASE_URL}{PROTOCOL_PATH}/{urllib.parse.quote(slug, safe='')}",
+                max_retries=self.max_retries,
+            )
+            size_mb = len(json.dumps(payload)) / 1_048_576
+            if size_mb > self.max_payload_mb:
+                errors.append(
+                    f"{protocol}: payload {size_mb:.1f} MB exceeds the "
+                    f"{self.max_payload_mb} MB guard"
+                )
+                continue
+            parsed = parse_tvl_history(payload)
+            rows_in += len(parsed)
+            if parsed.empty:
+                errors.append(f"{protocol}: no tvl array in the payload")
+                continue
+            # The configured display name, not the payload's: the rollup joins on it.
+            frames.append(parsed.assign(protocol=protocol))
+
+        if not frames:
+            return FetchResult(pd.DataFrame(columns=TVL_COLUMNS), rows_in, tuple(errors))
+        return FetchResult(pd.concat(frames, ignore_index=True), rows_in, tuple(errors))

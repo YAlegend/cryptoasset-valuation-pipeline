@@ -13,9 +13,11 @@ from cryptoval.sources.defillama import (
     REVENUE_PATH,
     DefiLlamaHistorySource,
     DefiLlamaSource,
+    DefiLlamaTvlSource,
     methodology_hash,
     parse_fee_history,
     parse_fees_overview,
+    parse_tvl_history,
     slug_map,
     trim_leading_zeros,
 )
@@ -441,11 +443,15 @@ def test_the_history_fetch_asks_for_revenue_with_the_right_data_type(monkeypatch
         dt.date(2015, 1, 1), dt.date(2026, 10, 13), [_eth_asset()], None
     )
     assert seen == [None, {"dataType": "dailyRevenue"}]
-    last = result.frame.sort_values("metric_date").iloc[-1]
+    # A named day, not iloc[-1]: the parser drops the current UTC date, so the last row of a
+    # frozen fixture is whichever day the clock has not yet reached -- the assertion used to
+    # go red by itself the morning after it was written.
+    frame = result.frame.set_index("metric_date")
+    day = frame.loc[pd.Timestamp("2026-10-13", tz="UTC")]
     # The two series are different quantities and must not arrive equal.
-    assert last["total_fees_usd"] != last["net_revenue_usd"]
-    assert last["total_fees_usd"] == pytest.approx(404507.0)
-    assert last["net_revenue_usd"] == pytest.approx(94003.0)
+    assert day["total_fees_usd"] != day["net_revenue_usd"]
+    assert day["total_fees_usd"] == pytest.approx(404507.0)
+    assert day["net_revenue_usd"] == pytest.approx(94003.0)
 
 
 def test_two_identical_history_fetches_change_no_stored_row(monkeypatch, load_fixture):
@@ -489,3 +495,75 @@ def test_one_display_name_mapping_to_two_slugs_is_refused(load_fixture):
     }
     with pytest.raises(ValueError, match="several slugs"):
         slug_map(doubled)
+
+
+def _aave_asset():
+    from cryptoval.config import Asset
+
+    return Asset(symbol="AAVE", cm_id="aave", gecko_id="aave", defillama_slugs=["Aave V3"])
+
+
+def test_parse_tvl_history_reads_the_tvl_array(load_fixture):
+    frame = parse_tvl_history(load_fixture("defillama_protocol_tvl.json"))
+    assert list(frame.columns) == ["protocol", "metric_date", "tvl_usd"]
+    assert frame["metric_date"].dt.tz is not None
+    assert (frame["tvl_usd"] > 0).all()
+    assert frame["protocol"].unique().tolist() == ["Aave V3"]
+    assert frame["tvl_usd"].dtype == "float64"
+
+
+def test_parse_tvl_history_drops_the_partial_current_day(load_fixture):
+    """The array carries today's 00:00 point AND a live one; both normalise to today, so
+    keeping them would break the (protocol, metric_date) uniqueness contract."""
+    payload = load_fixture("defillama_protocol_tvl.json")
+    now = pd.Timestamp.now(tz="UTC")
+    payload["tvl"] = [
+        {"date": int((now.normalize() - pd.Timedelta(days=1)).timestamp()), "totalLiquidityUSD": 1},
+        {"date": int(now.normalize().timestamp()), "totalLiquidityUSD": 2},
+        {"date": int(now.timestamp()), "totalLiquidityUSD": 3},
+    ]
+    frame = parse_tvl_history(payload)
+    assert len(frame) == 1
+    assert not frame["metric_date"].duplicated().any()
+
+
+def test_tvl_source_refuses_a_payload_above_its_size_guard(monkeypatch, load_fixture):
+    overview = load_fixture("defillama_overview_slugs.json")
+    big = {
+        "name": "Aave V3",
+        "tvl": [{"date": 1_700_000_000, "totalLiquidityUSD": 1.0}],
+        "padding": "x" * 2_000_000,
+    }
+    monkeypatch.setattr(
+        "cryptoval.sources.defillama.get_with_retry",
+        lambda client, url, params=None, **kw: overview if "/overview/" in url else big,
+    )
+    result = DefiLlamaTvlSource(max_payload_mb=1.0).fetch(
+        dt.date(2020, 1, 1), dt.date(2026, 10, 13), [_aave_asset()], client=None
+    )
+    assert result.frame.empty
+    assert any("exceeds the" in e and "MB" in e for e in result.errors)
+
+
+def test_two_identical_tvl_fetches_change_no_stored_row(monkeypatch, load_fixture):
+    """Same int64/float64 trap as the fee history: the vendor sends an int for a small TVL."""
+    overview = load_fixture("defillama_overview_slugs.json")
+    payload = load_fixture("defillama_protocol_tvl.json")
+    monkeypatch.setattr(
+        "cryptoval.sources.defillama.get_with_retry",
+        lambda client, url, params=None, **kw: overview if "/overview/" in url else payload,
+    )
+    args = (dt.date(2015, 1, 1), dt.date(2026, 10, 13), [_aave_asset()], None)
+    first = DefiLlamaTvlSource().fetch(*args).frame
+    second = DefiLlamaTvlSource().fetch(*args).frame
+    keys, values = ["protocol", "metric_date"], ["tvl_usd"]
+    stored = merge_scd2(
+        pd.DataFrame(columns=[*keys, *values]),
+        first,
+        keys,
+        values,
+        pd.Timestamp("2026-01-01", tz="UTC"),
+    )
+    again = merge_scd2(stored, second, keys, values, pd.Timestamp("2026-01-02", tz="UTC"))
+    assert len(again) == len(stored)
+    assert int(again["is_current"].sum()) == int(stored["is_current"].sum())

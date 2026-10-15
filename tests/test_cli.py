@@ -13,11 +13,12 @@ from cryptoval.scd2 import merge_scd2
 from cryptoval.sources.base import FetchResult
 
 
-def test_all_six_sources_are_registered():
+def test_every_source_is_registered():
     assert set(SOURCES) == {
         "coinmetrics",
         "defillama",
         "defillama_history",
+        "defillama_tvl",
         "coingecko",
         "coingecko_supply",
         "equities",
@@ -588,6 +589,7 @@ def test_scoping_leaves_equities_blocking():
     assert cli.SCOPED_SOURCES == {
         "defillama",
         "defillama_history",
+        "defillama_tvl",
         "coinmetrics",
         "coingecko",
         "coingecko_supply",
