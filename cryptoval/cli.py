@@ -11,13 +11,7 @@ import sys
 import httpx
 import pandas as pd
 
-import cryptoval.methods.benchmarks  # noqa: F401 -- import registers the family
-import cryptoval.methods.cashflow  # noqa: F401
-import cryptoval.methods.cohort  # noqa: F401
-import cryptoval.methods.cost  # noqa: F401
-import cryptoval.methods.monetary  # noqa: F401
-import cryptoval.methods.multiples  # noqa: F401
-import cryptoval.methods.network  # noqa: F401
+import cryptoval.methods  # noqa: F401 -- import registers every method family
 from cryptoval.config import Asset, Settings, load_config
 from cryptoval.contracts.checks import check_volume_anomaly, run_checks
 from cryptoval.contracts.identities import run_identity_checks

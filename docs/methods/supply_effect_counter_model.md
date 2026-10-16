@@ -1,0 +1,35 @@
+# supply_effect_counter_model
+
+**Family:** C_cashflow
+**Citation:** Spec 10.4's counter-model: fee burn and staking yield change the SUPPLY PATH, not value
+**Returns a fair value:** yes
+
+## Data dependencies
+
+- `market_cap_usd`
+- `supply`
+- `price_usd`
+
+Minimum coverage density: **50%** per column. Minimum observations:
+**365**. Below either threshold the method returns `applicable=False` with the
+measured density in its reason, rather than a number fitted on too little data.
+
+## Parameters
+
+- `horizon_years` = `10`
+- `window_rows` = `365`
+
+## Failure modes
+
+- This method exists to DISAGREE with the two DCFs, and it does so by construction: it holds network value constant and projects only the supply path, so its answer is today's market cap over tomorrow's supply. It is a null hypothesis, not a valuation, and the gap between it and eth_three_stage_dcf is the finding spec 10.4 asks for.
+- Holding network value constant is itself a strong claim: it says nothing the protocol earns changes what the network is worth.
+- The supply path is the trailing MEASURED growth in the supply series, compounded over the horizon. That already nets issuance against burn, which is why this method needs neither a fee column nor a burn-share parameter - the alternative would have assumed 100% of fees are burned, which is false for ETH (the burn is 20-50% of fees post-EIP-4844) and false for every asset whose fees are not burned at all.
+- Projecting trailing supply growth across ten years ignores every scheduled change: a halving, an EIP, a staking-rate shift. Compounding magnifies that error with the horizon.
+- Measured 2026-10-13: SNX reads 68.6% annual supply growth, which compounds to 184x supply over the horizon and values the token at $0.0013 against a $0.24 price. Compounding a trailing rate for a decade magnifies any error in it.
+- DEGENERATE FOR A NON-DILUTING ASSET. Where trailing supply growth is exactly zero -- 7 of the 24 assets on 2026-10-13: AAVE, ALGO, COMP, LDO, LINK, MANA, UNI -- projected supply equals today's and the answer is market cap over supply, which IS the price. The method returns its own input and carries no information for those assets.
+- Not meaningful for a pegged asset. USDC's supply shrank over the trailing year, so ten years of that shrinkage values a one-dollar stablecoin at $4.12. A peg is not a function of supply.
+
+## Assumptions
+
+- Value accrues only through the supply path, never through earnings.
+- Trailing-year supply growth continues for horizon_years.

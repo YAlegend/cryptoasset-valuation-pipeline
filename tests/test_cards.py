@@ -47,11 +47,24 @@ def test_the_hand_written_sections_live_in_config_so_regeneration_cannot_destroy
 
 def test_every_registered_method_has_a_config_and_vice_versa():
     """A method with no config cannot be run; a config with no method is a dead card."""
-    import cryptoval.methods.benchmarks  # noqa: F401  -- import registers the families
-    import cryptoval.methods.cost  # noqa: F401
-    import cryptoval.methods.monetary  # noqa: F401
-    import cryptoval.methods.multiples  # noqa: F401
-    import cryptoval.methods.network  # noqa: F401
+    import cryptoval.methods  # noqa: F401 -- import registers every method family
     from cryptoval.methods.registry import METHODS
 
     assert set(METHODS) == set(load_method_specs())
+
+
+def test_every_method_has_a_card_on_disk_and_the_registry_holds_all_35():
+    """`make cards` must have been re-run: a config with no card is an unpublished method.
+
+    35 = 14 from Plan 2 + 21 from Plan 3. A count that drifts without a plan entry is a
+    method someone added without a card or a config.
+    """
+    import pathlib
+
+    import cryptoval.methods  # noqa: F401 -- import registers every method family
+    from cryptoval.methods.registry import METHODS
+
+    cards = {p.stem for p in pathlib.Path("docs/methods").glob("*.md")}
+    missing = sorted(set(load_method_specs()) - cards)
+    assert not missing, f"method(s) with no card on disk -- run `make cards`: {missing}"
+    assert len(METHODS) == 35
