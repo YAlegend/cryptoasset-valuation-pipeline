@@ -236,3 +236,200 @@ class PriceToUtility:
                 )
             )
         return out
+
+
+def _annualised(series: pd.Series, window: int, annualise: bool = True) -> pd.Series:
+    """Trailing-window mean, scaled to a year for a flow and left alone for a stock.
+
+    A mean, not a sum: the window may contain fewer non-null days than rows, and summing
+    nulls-as-zero would understate a protocol whose feed had an outage.
+
+    ``annualise`` is False for TVL, which is a stock: multiplying a deposit balance by 365
+    would produce a denominator with no meaning and a target multiple nobody could
+    reconstruct. Absorbing the 365 into target_multiple instead would hide the same problem
+    behind a number whose units cannot be read off the row.
+    """
+    values = pd.to_numeric(series, errors="coerce")
+    mean = values.rolling(window, min_periods=max(1, window // 2)).mean()
+    return mean * 365.0 if annualise else mean
+
+
+def _supply_age_days(row) -> int | None:
+    """How far this row sits from the day the supply snapshot was taken.
+
+    Supply metadata is point-in-time: one figure per symbol, joined onto every date. The
+    multiples that use it are therefore valuing a 2020 row with 2026's supply, and the only
+    honest thing a row can do about that is say how large the gap is.
+    """
+    as_of = getattr(row, "supply_as_of", None)
+    if as_of is None or pd.isna(as_of):
+        return None
+    return int((pd.Timestamp(as_of) - pd.Timestamp(row.metric_date)).days)
+
+
+def _multiple_estimates(
+    frame: pd.DataFrame,
+    spec: MethodSpec,
+    params: dict,
+    numerator_supply: Callable[[Any], tuple[float | None, dict[str, Any], str]],
+) -> list[Estimate]:
+    """One loop for every multiple: annualise the denominator, divide by the supply the
+    numerator implies, scale by the target multiple.
+
+    ``numerator_supply`` returns (supply, extra inputs, refusal reason) for a row, which is
+    the only thing the five methods disagree about -- circulating supply for P/F, P/S and
+    P/TVL, maximum supply for FDV, circulating plus a haircut on locked for dFDV.
+
+    Every row here is a DIAGNOSTIC wearing a fair value's clothes: the target multiple is an
+    assumption, the estimate scales linearly in it, and diagnostics.status says so on every
+    row so the number cannot be lifted out of context without the caveat coming with it.
+    """
+    column = params["denominator"]
+    window = int(params.get("window_rows", 365))
+    target = float(params.get("target_multiple", 15.0))
+    phash = param_set_hash(params)
+    annual = _annualised(frame[column], window, bool(params.get("annualise", True)))
+    price = pd.to_numeric(frame["price_usd"], errors="coerce")
+
+    out: list[Estimate] = []
+    for position, row in enumerate(frame.itertuples(index=False)):
+        value = _finite(annual.iloc[position])
+        supply, extra, refusal = numerator_supply(row)
+        if refusal:
+            out.append(_refuse(spec, row, params, refusal))
+            continue
+        if value is None or value <= 0:
+            # <= 0, not just None: net revenue CAN be negative, and dividing a negative
+            # denominator into a price would publish a negative fair value that reads as a
+            # cheap asset rather than as a protocol paying out more than it earns.
+            out.append(
+                _refuse(spec, row, params, f"no positive annualised {column} over {window} rows")
+            )
+            continue
+        if supply is None or supply <= 0:
+            out.append(_refuse(spec, row, params, "no usable supply on this day"))
+            continue
+        today_price = _finite(price.iloc[position])
+        out.append(
+            Estimate(
+                symbol=row.symbol,
+                metric_date=row.metric_date,
+                method_id=spec.method_id,
+                param_set_hash=phash,
+                fair_value=value * target / supply,
+                band_low=None,
+                band_high=None,
+                inputs_used={
+                    "denominator": column,
+                    "annual_value_usd": value,
+                    "target_multiple": target,
+                    "window_rows": window,
+                    **extra,
+                },
+                diagnostics={
+                    "realised_multiple": (today_price * supply / value) if today_price else None,
+                    "supply_age_days": _supply_age_days(row),
+                    "status": "diagnostic_target_multiple_is_an_assumption",
+                },
+                applicable=True,
+                panel_vintage_ts=getattr(row, "panel_vintage_ts", None),
+            )
+        )
+    return out
+
+
+def _circulating(row) -> tuple[float | None, dict, str]:
+    supply = _finite(row.supply)
+    return supply, {"supply": supply, "supply_basis": "circulating"}, ""
+
+
+def _maximum(row) -> tuple[float | None, dict, str]:
+    supply = _finite(getattr(row, "max_supply", None))
+    if supply is None or supply <= 0:
+        # No fallback to total_supply: that would publish a market-cap multiple as an FDV one.
+        return None, {}, "no max_supply for this asset, so a fully diluted valuation does not exist"
+    return (
+        supply,
+        {
+            "supply": supply,
+            "supply_basis": "max_supply",
+            "supply_as_of": getattr(row, "supply_as_of", None),
+        },
+        "",
+    )
+
+
+def _haircut_locked(haircut: float) -> Callable[[Any], tuple[float | None, dict, str]]:
+    def inner(row) -> tuple[float | None, dict, str]:
+        circulating, total = _finite(row.supply), _finite(getattr(row, "total_supply", None))
+        if circulating is None or total is None or total < circulating:
+            # A total below circulating would make locked negative and haircut the supply
+            # UPWARDS, inflating the fair value. The two figures come from DIFFERENT vendors
+            # -- circulating from Coin Metrics, total from CoinGecko -- so this fires on 7 of
+            # 24 assets (BNB by 41%, UNI 13%, ALGO 10%, POL, SNX, MKR, MANA). Subtracting one
+            # vendor's supply from another's is the defect; the refusal names it rather than
+            # implying the data is corrupt.
+            return (
+                None,
+                {},
+                "circulating supply (Coin Metrics) exceeds total supply (CoinGecko), so the "
+                "locked portion would be negative: the two vendors disagree about this asset",
+            )
+        locked = total - circulating
+        return (
+            circulating + haircut * locked,
+            {
+                "supply_basis": "circulating_plus_haircut_locked",
+                "circulating_supply": circulating,
+                "total_supply": total,
+                "locked_supply": locked,
+                "locked_haircut": haircut,
+                "effective_supply": circulating + haircut * locked,
+                "supply_as_of": getattr(row, "supply_as_of", None),
+            },
+            "",
+        )
+
+    return inner
+
+
+@register
+class PriceToFees:
+    spec = _SPECS["price_to_fees"]
+
+    def estimate(self, frame: pd.DataFrame, params: dict) -> list[Estimate]:
+        return _multiple_estimates(frame, self.spec, params, _circulating)
+
+
+@register
+class PriceToSales:
+    spec = _SPECS["price_to_sales"]
+
+    def estimate(self, frame: pd.DataFrame, params: dict) -> list[Estimate]:
+        return _multiple_estimates(frame, self.spec, params, _circulating)
+
+
+@register
+class FdvToRevenue:
+    spec = _SPECS["fdv_to_revenue"]
+
+    def estimate(self, frame: pd.DataFrame, params: dict) -> list[Estimate]:
+        return _multiple_estimates(frame, self.spec, params, _maximum)
+
+
+@register
+class DfdvToRevenue:
+    spec = _SPECS["dfdv_to_revenue"]
+
+    def estimate(self, frame: pd.DataFrame, params: dict) -> list[Estimate]:
+        return _multiple_estimates(
+            frame, self.spec, params, _haircut_locked(float(params.get("locked_haircut", 0.5)))
+        )
+
+
+@register
+class PriceToTvl:
+    spec = _SPECS["price_to_tvl"]
+
+    def estimate(self, frame: pd.DataFrame, params: dict) -> list[Estimate]:
+        return _multiple_estimates(frame, self.spec, params, _circulating)

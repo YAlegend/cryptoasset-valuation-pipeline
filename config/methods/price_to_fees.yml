@@ -1,0 +1,21 @@
+method_id: price_to_fees
+family: D_multiples
+requires: [price_usd, supply, total_fees_usd]
+min_density: 0.5
+min_rows: 365
+params: {window_rows: 365, target_multiple: 20.0, denominator: total_fees_usd}
+citation: "P/F, spec 10.5; denominator discipline per spec 10.4"
+
+# Card prose (spec 12): the judgment that cannot be derived from the spec above.
+failure_modes:
+- 'GROSS FEES, not revenue: most of this number is routed to liquidity providers and never reaches a
+  token holder. P/F is systematically the most flattering of the three denominators, which is why
+  the row names its denominator.'
+- 'target_multiple 20.0 is a CHOICE, not a measurement: the estimate scales linearly in it, and no
+  cross-asset work has yet established what multiple this sector supports.'
+- An annualised trailing window assumes the last year of fees repeats; for a protocol in a fee
+  regime change it does not.
+- The protocol rollup sums a symbol's configured protocols, so a symbol whose slug list is
+  incomplete understates its own fees.
+assumptions:
+- Trailing-window fees annualise, and 20x fees is a defensible multiple.

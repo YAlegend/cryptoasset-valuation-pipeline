@@ -459,12 +459,31 @@ def _read_panel(settings: Settings) -> pd.DataFrame:
         con.close()
 
 
+def _keep_unrun_methods(settings: Settings, estimates: pd.DataFrame) -> pd.DataFrame:
+    """Carry forward the methods this run did not execute.
+
+    Gold is replaced wholesale (io.bronze.write_gold), which is right for a full run and
+    silently destructive for `estimate --methods <subset>`: it would leave the mart holding
+    5 methods of 28, with every dbt test still green because each one passes on a table that
+    is merely incomplete. The rows carried forward keep their own panel_vintage_ts, so a
+    stale method is visible as a stale vintage rather than hidden behind this run's.
+    """
+    path = pathlib.Path(settings.data_root) / "gold" / "valuation_estimate"
+    if not path.exists():
+        return estimates
+    stored = pd.read_parquet(path)
+    retained = stored[~stored["method_id"].isin(estimates["method_id"].unique())]
+    if retained.empty:
+        return estimates
+    return pd.concat([retained, estimates], ignore_index=True)
+
+
 def run_estimate(
     settings: Settings, assets: list[Asset], method_ids: list[str] | None = None
 ) -> dict[str, dict]:
     panel = _read_panel(settings)
     estimates = run_methods(panel, METHODS, method_ids)
-    write_gold(settings.resolver, "valuation_estimate", estimates)
+    write_gold(settings.resolver, "valuation_estimate", _keep_unrun_methods(settings, estimates))
     report: dict[str, dict] = {}
     for method_id, group in estimates.groupby("method_id"):
         report[str(method_id)] = {

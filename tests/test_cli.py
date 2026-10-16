@@ -865,3 +865,35 @@ def test_read_panel_widens_against_the_real_marts(tmp_path, monkeypatch):
     # protocol_count came from the revenue mart alone; the TVL mart's copy is not selected.
     assert "protocol_count_x" not in wide.columns
     assert "cm_id" not in wide.columns
+
+
+def test_a_subset_estimate_run_does_not_delete_the_methods_it_did_not_run(tmp_path):
+    """write_gold replaces the table wholesale, so `estimate --methods <subset>` would
+    otherwise leave the mart holding a fraction of the methods with every test still green."""
+    stored = pd.DataFrame(
+        {
+            "method_id": ["stock_to_flow", "stock_to_flow", "price_to_fees"],
+            "symbol": ["BTC", "ETH", "AAVE"],
+            "fair_value": [1.0, 2.0, 3.0],
+        }
+    )
+    (tmp_path / "gold" / "valuation_estimate").mkdir(parents=True)
+    stored.to_parquet(tmp_path / "gold" / "valuation_estimate" / "part-0.parquet")
+
+    fresh = pd.DataFrame({"method_id": ["price_to_fees"], "symbol": ["AAVE"], "fair_value": [9.0]})
+    merged = cli._keep_unrun_methods(Settings(data_root=str(tmp_path)), fresh)
+
+    assert set(merged["method_id"]) == {"stock_to_flow", "price_to_fees"}
+    # The re-run method is REPLACED, not appended to.
+    assert merged.loc[merged["method_id"] == "price_to_fees", "fair_value"].tolist() == [9.0]
+    assert len(merged) == 3
+
+
+def test_a_full_estimate_run_still_replaces_everything(tmp_path):
+    """A method deleted from config must disappear from gold, not be carried forward."""
+    stored = pd.DataFrame({"method_id": ["retired"], "symbol": ["BTC"], "fair_value": [1.0]})
+    (tmp_path / "gold" / "valuation_estimate").mkdir(parents=True)
+    stored.to_parquet(tmp_path / "gold" / "valuation_estimate" / "part-0.parquet")
+    fresh = pd.DataFrame({"method_id": ["retired"], "symbol": ["BTC"], "fair_value": [2.0]})
+    merged = cli._keep_unrun_methods(Settings(data_root=str(tmp_path)), fresh)
+    assert merged["fair_value"].tolist() == [2.0]
