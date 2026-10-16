@@ -85,6 +85,7 @@ def load_method_specs(config_dir: str = "config/methods") -> dict[str, MethodSpe
             params=dict(raw.get("params", {}) or {}),
             citation=raw.get("citation", ""),
             returns_fair_value=bool(raw.get("returns_fair_value", True)),
+            cross_sectional=bool(raw.get("cross_sectional", False)),
         )
         if spec.method_id in specs:
             raise ValueError(f"duplicate method_id {spec.method_id} in {path}")
@@ -150,6 +151,23 @@ def run_methods(
         method = methods[method_id]
         spec = method.spec
         circular = circularity(spec)
+
+        if spec.cross_sectional:
+            # The whole panel in one call, not a per-symbol group: the cohort IS the
+            # cross-section, so grouping by symbol would hand the method a cohort of one
+            # and refuse the entire universe. The method does its own per-row refusing,
+            # which is why covered_span and resolve_applicability are skipped here --
+            # both are statements about one symbol's history.
+            try:
+                estimates = method.estimate(panel.reset_index(drop=True), dict(spec.params))
+            except Exception as exc:
+                rows.append(
+                    _refusal("*", spec, f"method raised {type(exc).__name__}: {exc}", panel)
+                )
+                continue
+            rows.extend(_row(e, circular) for e in estimates)
+            continue
+
         for symbol, group in panel.groupby("symbol", sort=True):
             frame = covered_span(
                 spec, group.sort_values("metric_date").reset_index(drop=True)

@@ -55,6 +55,9 @@ class MethodSpec:
     params: dict[str, Any]
     citation: str
     returns_fair_value: bool = True
+    # True for a method whose answer needs every symbol on one date rather than one
+    # symbol's history. run_methods hands it the whole panel instead of a per-symbol group.
+    cross_sectional: bool = False
 
 
 @dataclass(frozen=True)
