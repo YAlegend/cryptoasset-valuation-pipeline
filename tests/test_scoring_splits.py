@@ -62,3 +62,39 @@ def test_the_fold_report_states_non_overlapping_sample_size_per_horizon():
     assert report["non_overlapping_windows"] < 30
     daily = fold_report(n_rows=4305, horizon=1)
     assert daily["non_overlapping_windows"] > 1000
+
+
+def test_a_refusal_for_too_few_rows_names_the_minimum_not_the_span():
+    report = fold_report(n_rows=500, horizon=30)
+    assert report["folds"] == 0
+    assert "500 rows" in report["reason"]
+    assert f"minimum {MIN_ROWS_TO_FOLD} rows" in report["reason"]
+    assert "usable" not in report["reason"]
+
+
+def test_a_refusal_caused_by_the_horizon_names_the_span_and_the_first_test_row():
+    # 1000 rows clears the 730 minimum, so the minimum must not be the stated cause.
+    report = fold_report(n_rows=1000, horizon=365)
+    assert report["folds"] == 0
+    assert "1000 rows" in report["reason"]
+    assert "635 usable rows" in report["reason"]
+    assert "first test row is 740" in report["reason"]
+    assert "minimum 730" not in report["reason"]
+
+
+@pytest.mark.parametrize("n_rows", [730, 1200, 3000, 4305])
+@pytest.mark.parametrize("horizon", [1, 7, 30, 90, 365])
+@pytest.mark.parametrize("embargo_days", [0, 10])
+def test_the_purge_invariant_holds_across_the_grid(n_rows, horizon, embargo_days):
+    folds = expanding_folds(n_rows=n_rows, horizon=horizon, embargo_days=embargo_days)
+    if (n_rows, horizon) == (730, 365):
+        # The usable span of 365 rows never reaches the first test row, so nothing is emitted.
+        assert folds == []
+        return
+    assert len(folds) == 5
+    for fold in folds:
+        assert fold.train.start == 0
+        # The purge: no training label reaches into the test block.
+        assert fold.train.stop + horizon <= fold.test.start
+        assert fold.test.stop <= n_rows - horizon
+        assert fold.test.stop - fold.test.start > 0

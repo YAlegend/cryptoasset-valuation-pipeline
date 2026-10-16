@@ -94,12 +94,25 @@ def fold_report(
     """
     folds = expanding_folds(n_rows, horizon, n_folds, embargo_days, min_train_rows)
     if not folds:
-        return {
-            "folds": 0,
-            "reason": (
+        if n_rows < MIN_ROWS_TO_FOLD:
+            reason = (
                 f"{n_rows} rows at horizon {horizon} cannot carry {n_folds} purged folds "
                 f"(minimum {MIN_ROWS_TO_FOLD} rows, {min_train_rows} training rows per fold)"
-            ),
+            )
+        else:
+            # Enough rows, but the horizon consumes the tail: name the span it had and the
+            # row its first test block needed to reach.
+            usable = n_rows - horizon
+            first_test = min_train_rows + horizon + embargo_days
+            reason = (
+                f"{n_rows} rows at horizon {horizon} leaves {usable} usable rows; the first "
+                f"test row is {first_test} ({min_train_rows} training + {horizon} purge + "
+                f"{embargo_days} embargo), and {n_folds} test blocks need "
+                f"{first_test + n_folds} usable rows"
+            )
+        return {
+            "folds": 0,
+            "reason": reason,
             "non_overlapping_windows": 0.0,
             "smallest_train_rows": 0,
             "test_rows": 0,
