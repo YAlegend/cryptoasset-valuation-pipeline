@@ -14,3 +14,4 @@ htmlcov/
 *.egg-info/
 dbt/.user.yml
 .DS_Store
+.worktrees/
