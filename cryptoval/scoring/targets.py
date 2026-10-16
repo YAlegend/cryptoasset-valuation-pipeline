@@ -68,6 +68,27 @@ def signal_matrix(estimates: pd.DataFrame, price: pd.DataFrame) -> pd.DataFrame:
     return merged.drop(columns=["price_usd"])
 
 
+def _require_contiguous_days(panel: pd.DataFrame) -> None:
+    """Raise if any symbol's dates step by more than one day.
+
+    shift(1) and shift(-h) count rows, so they are days only while each symbol's panel is a
+    contiguous daily grid. A missing day would stretch every lag and horizon across it with
+    no test failing, so the steps are measured rather than assumed. The check runs per
+    symbol, so the boundary between two symbols is never read as a step.
+    """
+    for symbol, dates in panel.groupby("symbol", sort=False)["metric_date"]:
+        dates = dates.reset_index(drop=True)
+        steps = dates.diff().dt.days
+        gapped = steps[steps > 1]
+        if not gapped.empty:
+            row = gapped.index[0]
+            raise ValueError(
+                f"{symbol} has a {int(steps[row])}-day step into {dates[row]:%Y-%m-%d} "
+                f"({int(steps[row]) - 1} missing day(s)); a row shift would silently stretch "
+                f"every lag and horizon across it"
+            )
+
+
 def build_frame(panel: pd.DataFrame, estimates: pd.DataFrame, horizon: int) -> pd.DataFrame:
     """(symbol, metric_date, y, <feature per method>) for one horizon, lagged and sorted.
 
@@ -75,6 +96,7 @@ def build_frame(panel: pd.DataFrame, estimates: pd.DataFrame, horizon: int) -> p
     dropped it, so a missing column is explained rather than merely absent.
     """
     price = panel[["symbol", "metric_date", "price_usd"]].sort_values(["symbol", "metric_date"])
+    _require_contiguous_days(price)
     signals = signal_matrix(estimates, price).sort_values(["symbol", "metric_date"])
     methods = [c for c in signals.columns if c not in ("symbol", "metric_date")]
 

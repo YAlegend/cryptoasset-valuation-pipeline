@@ -96,3 +96,26 @@ def test_a_non_positive_fair_value_yields_no_signal_rather_than_a_nan_log():
     signals = signal_matrix(estimates, price)
     assert signals["thermocap_floor"].iloc[:10].isna().all()
     assert signals["thermocap_floor"].iloc[10:].notna().any()
+
+
+def _two_symbol_panel(days: int = 400) -> pd.DataFrame:
+    eth = _price_frame(days).assign(symbol="ETH", price_usd=lambda d: d["price_usd"] * 0.05)
+    return pd.concat([_price_frame(days), eth], ignore_index=True)
+
+
+def test_a_contiguous_two_symbol_panel_passes_the_gap_guard():
+    """The symbol boundary must not read as a gap: BTC's last day is not ETH's first."""
+    panel = _two_symbol_panel()
+    estimates = _estimates(panel, "mayer_multiple", np.linspace(1.2, 1.8, len(panel)))
+    frame = build_frame(panel, estimates, horizon=1)
+    assert set(frame["symbol"]) == {"BTC", "ETH"}
+
+
+def test_a_missing_day_in_one_symbol_raises_with_the_symbol_and_the_gap_size():
+    panel = _two_symbol_panel()
+    gap_row = (panel["symbol"] == "ETH") & (panel["metric_date"] == pd.Timestamp("2024-02-10"))
+    panel = panel[~gap_row]
+    estimates = _estimates(panel, "mayer_multiple", np.linspace(1.2, 1.8, len(panel)))
+    with pytest.raises(ValueError, match="ETH") as err:
+        build_frame(panel, estimates, horizon=1)
+    assert "2-day step" in str(err.value)
