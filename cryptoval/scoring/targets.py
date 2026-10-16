@@ -69,24 +69,28 @@ def signal_matrix(estimates: pd.DataFrame, price: pd.DataFrame) -> pd.DataFrame:
 
 
 def _require_contiguous_days(panel: pd.DataFrame) -> None:
-    """Raise if any symbol's dates step by more than one day.
+    """Raise unless each symbol's dates step by exactly one day.
 
     shift(1) and shift(-h) count rows, so they are days only while each symbol's panel is a
     contiguous daily grid. A missing day would stretch every lag and horizon across it with
-    no test failing, so the steps are measured rather than assumed. The check runs per
-    symbol, so the boundary between two symbols is never read as a step.
+    no test failing, and a duplicated day would give its second copy a 0-day lag, the
+    same-day leak the lag exists to prevent. The steps are measured rather than assumed.
+    The check runs per symbol, so the boundary between two symbols is never read as a step.
     """
     for symbol, dates in panel.groupby("symbol", sort=False)["metric_date"]:
         dates = dates.reset_index(drop=True)
         steps = dates.diff().dt.days
-        gapped = steps[steps > 1]
-        if not gapped.empty:
-            row = gapped.index[0]
-            raise ValueError(
-                f"{symbol} has a {int(steps[row])}-day step into {dates[row]:%Y-%m-%d} "
-                f"({int(steps[row]) - 1} missing day(s)); a row shift would silently stretch "
-                f"every lag and horizon across it"
-            )
+        broken = steps[(steps > 1) | (steps < 1)]
+        if not broken.empty:
+            row = broken.index[0]
+            step = int(steps[row])
+            if step < 1:
+                cause = f"a duplicate date, {dates[row]:%Y-%m-%d} ({step}-day step)"
+                effect = "give the second copy a 0-day lag, the same-day leak the lag prevents"
+            else:
+                cause = f"a {step}-day step into {dates[row]:%Y-%m-%d} ({step - 1} missing day(s))"
+                effect = "silently stretch every lag and horizon across it"
+            raise ValueError(f"{symbol} has {cause}; a row shift would {effect}")
 
 
 def build_frame(panel: pd.DataFrame, estimates: pd.DataFrame, horizon: int) -> pd.DataFrame:
@@ -110,6 +114,7 @@ def build_frame(panel: pd.DataFrame, estimates: pd.DataFrame, horizon: int) -> p
     )
 
     dropped: dict[str, str] = {}
+    # Full-sample variance is harmless: the 1e-12 floor drops only signals constant on every row.
     for method_id in methods:
         variance = float(out[method_id].var(skipna=True)) if out[method_id].notna().any() else 0.0
         if not np.isfinite(variance) or variance < MIN_SIGNAL_VARIANCE:

@@ -119,3 +119,31 @@ def test_a_missing_day_in_one_symbol_raises_with_the_symbol_and_the_gap_size():
     with pytest.raises(ValueError, match="ETH") as err:
         build_frame(panel, estimates, horizon=1)
     assert "2-day step" in str(err.value)
+
+
+def test_a_duplicated_day_raises_with_the_symbol_and_the_date():
+    panel = _two_symbol_panel()
+    same_day = (panel["symbol"] == "ETH") & (panel["metric_date"] == pd.Timestamp("2024-02-10"))
+    panel = pd.concat([panel, panel[same_day]], ignore_index=True)
+    estimates = _estimates(panel, "mayer_multiple", np.linspace(1.2, 1.8, len(panel)))
+    with pytest.raises(ValueError, match="ETH") as err:
+        build_frame(panel, estimates, horizon=1)
+    assert "duplicate date, 2024-02-10" in str(err.value)
+
+
+def test_the_lag_and_the_target_never_cross_a_symbol_boundary():
+    """Without the groupby, BTC's last rows would take ETH's first prices, and the reverse."""
+    panel = _two_symbol_panel()
+    estimates = _estimates(panel, "mayer_multiple", np.linspace(1.2, 1.8, len(panel)))
+    frame = build_frame(panel, estimates, horizon=7)
+    assert frame.groupby("symbol")["mayer_multiple"].head(1).isna().all()
+    assert frame.groupby("symbol")["y"].tail(7).isna().all()
+
+
+def test_build_frame_wires_the_target_at_the_requested_horizon():
+    """A horizon hardcoded to 1 inside build_frame would pass every other test in this file."""
+    price = _price_frame()
+    estimates = _estimates(price, "mayer_multiple", np.linspace(1.2, 1.8, len(price)))
+    frame = build_frame(price, estimates, horizon=7)
+    expected = np.log(price["price_usd"].shift(-7) / price["price_usd"])
+    np.testing.assert_allclose(frame["y"].to_numpy(), expected.to_numpy(), equal_nan=True)
