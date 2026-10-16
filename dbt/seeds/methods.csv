@@ -1,8 +1,12 @@
 method_id,family,requires,min_density,min_rows,citation,returns_fair_value
+bond_target_yield,C_cashflow,total_fees_usd|supply|price_usd,0.5,180,"Spec 10.4, bond-style target yield = annual fees / (risk free + staking premium)",true
 crypto_qtm,A_monetary,volume_total_usd|supply|price_usd,0.6,180,"dissertation section 3.1, crypto quantity theory of money",true
 crypto_qtm_panel_velocity,A_monetary,volume_total_usd|supply|price_usd|velocity_total,0.6,180,dissertation section 3.1 as literally specified; retained to measure the circularity,true
+defi_net_revenue_dcf,C_cashflow,net_revenue_usd|revenue_regime|supply|price_usd,0.5,180,"Spec 10.4, DeFi net-revenue DCF - the retained share, never gross fees",true
 dfdv_to_revenue,D_multiples,price_usd|supply|total_supply|net_revenue_usd,0.5,365,"dFDV, spec 10.4 - a haircut on locked supply rather than naive full dilution",true
+emissions_adjusted_real_yield,C_cashflow,total_fees_usd|issuance_usd|market_cap_usd,0.5,365,"Spec 10.4, emissions-adjusted real yield",false
 energy_value,E_cost,hash_rate|issuance_usd|price_usd,0.9,400,"Charles Edwards / Capriole (2019), energy value",true
+eth_three_stage_dcf,C_cashflow,net_revenue_usd|issuance_usd|supply|price_usd,0.5,365,"Spec 10.4, ETH three-stage DCF; discount rate decomposed per spec 10.4",true
 fdv_to_revenue,D_multiples,price_usd|max_supply|net_revenue_usd,0.5,365,"FDV/revenue, spec 10.5; FDV assumes full dilution at today's price",true
 hayes_cost_of_production,E_cost,hash_rate|issuance_usd|price_usd,0.9,180,"Hayes (2017), cost of production model; dissertation section 3.4",true
 holding_time_correction,A_monetary,velocity_total,0.6,365,Kampakis et al. (2024); corrects dissertation sections 3.1 and 3.6,false
@@ -27,4 +31,5 @@ puell_multiple,E_cost,issuance_usd|price_usd,0.9,730,"David Puell (2019), Puell 
 realized_price,E_cost,realized_cap|supply,0.5,30,"Coinmetrics (2018), realized capitalisation; dissertation section 3.5",true
 sector_cohort_zscore,D_multiples,market_cap_usd|net_revenue_usd|sector,0.3,1,Sector-cohorted relative valuation (spec 10.5),false
 stock_to_flow,F_shelf,market_cap_usd|supply|issuance_usd|price_usd,0.9,730,"PlanB (2019), Modeling Bitcoin Value with Scarcity; falsified post-2021",true
+supply_effect_counter_model,C_cashflow,market_cap_usd|supply|price_usd,0.5,365,"Spec 10.4's counter-model: fee burn and staking yield change the SUPPLY PATH, not value",true
 thermocap_floor,E_cost,thermocap_usd|supply,0.5,30,Nick Carter / Coinmetrics thermocap; dissertation section 3.5,true
