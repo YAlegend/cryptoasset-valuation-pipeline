@@ -81,9 +81,7 @@ class CoinGeckoSource:
                         "from": int(
                             dt.datetime.combine(start, dt.time.min, tzinfo=dt.UTC).timestamp()
                         ),
-                        "to": int(
-                            dt.datetime.combine(end, dt.time.max, tzinfo=dt.UTC).timestamp()
-                        ),
+                        "to": int(dt.datetime.combine(end, dt.time.max, tzinfo=dt.UTC).timestamp()),
                     },
                     max_retries=self.max_retries,
                     initial_delay=2.0,
@@ -145,9 +143,7 @@ class EquitySource:
         # drops the affected tickers and still returns a frame for the rest (seen live on
         # 2026-10-11 for TSLA and META). Name them, or the run reports success.
         missing = sorted(set(tickers) - set(frame["asset"]))
-        return FetchResult(
-            frame, len(frame), tuple(f"{t}: no rows returned" for t in missing)
-        )
+        return FetchResult(frame, len(frame), tuple(f"{t}: no rows returned" for t in missing))
 
 
 SUPPLY_COLUMNS = [

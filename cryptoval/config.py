@@ -133,8 +133,7 @@ def load_config(config_dir: str = "config") -> tuple[Settings, list[Asset]]:
             # tuple("Lido") is ('L','i','d','o'): four slugs that match no protocol, so the
             # rollup silently emits no revenue for the asset and no check fails.
             raise ValueError(
-                f"{row.get('symbol')}: defillama_slugs must be a list, "
-                f"got the string {slugs!r}"
+                f"{row.get('symbol')}: defillama_slugs must be a list, got the string {slugs!r}"
             )
         row["defillama_slugs"] = tuple(slugs)
         row["metric_sources"] = dict(row.get("metric_sources") or {})

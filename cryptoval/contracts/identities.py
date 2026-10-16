@@ -16,9 +16,7 @@ from cryptoval.contracts.checks import CheckResult
 DEFAULT_RTOL = 1e-6
 
 
-def _relative_mismatch(
-    left: pd.Series, right: pd.Series, rtol: float
-) -> tuple[int, float]:
+def _relative_mismatch(left: pd.Series, right: pd.Series, rtol: float) -> tuple[int, float]:
     """Count rows where left deviates from right by more than rtol (relative to right).
 
     Nulls are *unknown* and are dropped: the vendor legitimately omits metrics. A zero
@@ -56,9 +54,7 @@ def check_mvrv_identity(df: pd.DataFrame, rtol: float = DEFAULT_RTOL) -> CheckRe
             f"{n_nonpositive} rows with non-positive CapMVRVCur (realized_cap undefined)"
         )
     if n_bad:
-        problems.append(
-            f"{n_bad} rows where realized_cap != market_cap/mvrv (worst {worst:.2e})"
-        )
+        problems.append(f"{n_bad} rows where realized_cap != market_cap/mvrv (worst {worst:.2e})")
     return CheckResult("identity_mvrv", not problems, "; ".join(problems))
 
 

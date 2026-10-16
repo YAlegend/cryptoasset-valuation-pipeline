@@ -15,8 +15,17 @@ import pandas as pd
 from cryptoval.paths import PathResolver
 
 COLUMNS = [
-    "run_id", "git_sha", "source", "params", "started_at", "ended_at",
-    "rows_in", "rows_out", "bytes_scanned", "status", "error",
+    "run_id",
+    "git_sha",
+    "source",
+    "params",
+    "started_at",
+    "ended_at",
+    "rows_in",
+    "rows_out",
+    "bytes_scanned",
+    "status",
+    "error",
 ]
 
 

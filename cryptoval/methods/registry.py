@@ -169,9 +169,7 @@ def run_methods(
             continue
 
         for symbol, group in panel.groupby("symbol", sort=True):
-            frame = covered_span(
-                spec, group.sort_values("metric_date").reset_index(drop=True)
-            )
+            frame = covered_span(spec, group.sort_values("metric_date").reset_index(drop=True))
             ok, reason = resolve_applicability(spec, frame)
             if not ok:
                 rows.append(_refusal(str(symbol), spec, reason, frame))
