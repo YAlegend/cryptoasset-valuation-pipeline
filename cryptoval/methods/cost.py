@@ -12,13 +12,10 @@ calibrates it against observed price before it ships.
 
 from __future__ import annotations
 
-import math
-from typing import Any
-
 import numpy as np
 import pandas as pd
 
-from cryptoval.methods.base import Estimate, MethodSpec
+from cryptoval.methods.base import Estimate, MethodSpec, _finite
 from cryptoval.methods.monetary import _refuse
 from cryptoval.methods.registry import load_method_specs, param_set_hash, register
 
@@ -27,15 +24,6 @@ _SPECS = load_method_specs()
 # Named on every row that uses hayes_cost_per_coin: the hardware and vendor unit these
 # parameters were measured against. Anything else is out of calibration, not approximate.
 PARAMETER_CALIBRATION = "sha256_asic_fleet_coinmetrics_hashrate_unit"
-
-
-def _finite(value: Any) -> float | None:
-    """None for anything that cannot be a price: NaN, inf, or a non-number."""
-    try:
-        number = float(value)
-    except TypeError, ValueError:
-        return None
-    return number if math.isfinite(number) else None
 
 
 def _per_unit_estimates(

@@ -27,6 +27,7 @@ then names both bases in its diagnostics.
 from __future__ import annotations
 
 import datetime as dt
+import math
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
@@ -43,6 +44,19 @@ MARKET_CAP_DERIVED = frozenset(
         "investor_cap_usd",  # realized_cap - thermocap
     }
 )
+
+
+def _finite(value: Any) -> float | None:
+    """None for anything that cannot be a price: NaN, inf, or a non-number.
+
+    Lives here rather than in cost.py because four method modules need it and cost.py
+    imports _refuse from monetary.py -- so monetary.py could not reach it without a cycle.
+    """
+    try:
+        number = float(value)
+    except TypeError, ValueError:
+        return None
+    return number if math.isfinite(number) else None
 
 
 @dataclass(frozen=True)
@@ -104,9 +118,7 @@ def covered_span(spec: MethodSpec, frame: pd.DataFrame) -> pd.DataFrame:
     void is not sparsity, so it is dropped before applicability is judged -- and the
     method sees only the span it could legitimately fit on.
     """
-    starts = [
-        frame[c].first_valid_index() for c in spec.requires if c in frame.columns
-    ]
+    starts = [frame[c].first_valid_index() for c in spec.requires if c in frame.columns]
     if not starts or any(s is None for s in starts):
         # A wholly empty required column: leave the frame alone so the 0% density is
         # what gets reported, rather than an empty-slice reason that hides the cause.
@@ -135,8 +147,7 @@ def resolve_applicability(spec: MethodSpec, frame: pd.DataFrame) -> tuple[bool, 
         density = float(frame[column].notna().mean())
         if density < spec.min_density:
             return False, (
-                f"{column} is {density:.1%} dense, below this method's floor "
-                f"{spec.min_density:.1%}"
+                f"{column} is {density:.1%} dense, below this method's floor {spec.min_density:.1%}"
             )
     return True, ""
 

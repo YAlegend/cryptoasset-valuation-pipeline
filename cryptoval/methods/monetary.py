@@ -21,12 +21,14 @@ with collapses_to_price in its diagnostics. Where they differ IS the finding (sp
 from __future__ import annotations
 
 import math
+import warnings
 
 import numpy as np
 import pandas as pd
+import statsmodels.api as sm
 from statsmodels.stats.diagnostic import normal_ad
 
-from cryptoval.methods.base import Estimate, MethodSpec
+from cryptoval.methods.base import Estimate, MethodSpec, _finite
 from cryptoval.methods.registry import (
     load_method_specs,
     param_set_hash,
@@ -135,7 +137,7 @@ def _velocity_for(row, params: dict) -> tuple[float | None, bool]:
         value = getattr(row, "velocity_total", None)
         try:
             value = float(value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None, True
         return (value if math.isfinite(value) and value > 0 else None), True
     value = float(params["velocity_daily"])
@@ -238,6 +240,149 @@ class JCurve:
                         "deuv": price - cuv,
                         "deuv_share": (price - cuv) / price if price else None,
                         "collapses_to_price": collapses,
+                    },
+                    applicable=True,
+                    panel_vintage_ts=getattr(row, "panel_vintage_ts", None),
+                )
+            )
+        return out
+
+
+EOE_TERMS = ("beta_t", "beta_m", "beta_inv_v")
+
+
+def fit_log_linear_eoe(frame: pd.DataFrame, min_rows: int) -> dict | None:
+    """OLS of log(price) on log(T), log(M) and log(1/V) -- spec 10.2's Kampakis form.
+
+    None below min_rows or when too few rows have all four quantities strictly positive.
+    The caller turns that into a refusal naming the measurement.
+
+    THE THREE COEFFICIENTS ARE NOT SEPARATELY IDENTIFIED on this panel. velocity_total is
+    defined as volume_total_usd / market_cap_usd, so log(1/V) == log(M) - log(T) exactly
+    and the design matrix is rank-deficient; statsmodels falls back to a minimum-norm
+    pseudo-inverse, which returns numbers that look like estimates and are not. Rather than
+    publish those silently, the fit measures its own rank, reports
+    ``coefficients_identified``, and also fits the reparameterisation that IS identified:
+
+        log P = alpha + (beta_T - beta_invV) log T + (beta_M + beta_invV) log M
+
+    The PREDICTION is identified either way -- a new point lies in the column space by the
+    same identity -- which is why a fair value is still returned.
+    """
+    work = pd.DataFrame(
+        {
+            "price": pd.to_numeric(frame["price_usd"], errors="coerce"),
+            "t": pd.to_numeric(frame["volume_total_usd"], errors="coerce"),
+            "m": pd.to_numeric(frame["market_cap_usd"], errors="coerce"),
+            "v": pd.to_numeric(frame["velocity_total"], errors="coerce"),
+        }
+    )
+    work = work[(work > 0).all(axis=1)].dropna()
+    if len(work) < min_rows:
+        return None
+
+    log_t = np.log(work["t"].to_numpy())
+    log_m = np.log(work["m"].to_numpy())
+    log_inv_v = np.log(1.0 / work["v"].to_numpy())
+    log_price = np.log(work["price"].to_numpy())
+
+    design = sm.add_constant(np.column_stack([log_t, log_m, log_inv_v]))
+    rank = int(np.linalg.matrix_rank(design))
+    with warnings.catch_warnings():
+        # The rank deficiency is the finding, reported below; one warning per fit over
+        # tens of thousands of fits would bury the run's real output.
+        warnings.simplefilter("ignore")
+        result = sm.OLS(log_price, design).fit()
+        identified = sm.OLS(log_price, sm.add_constant(np.column_stack([log_t, log_m]))).fit()
+
+    intervals = result.conf_int()
+    fit: dict = {
+        "alpha": float(result.params[0]),
+        "adj_r_squared": float(result.rsquared_adj),
+        "durbin_watson": float(sm.stats.stattools.durbin_watson(result.resid)),
+        "n": int(len(work)),
+        # Load-bearing. False means the three betas below are a pseudo-inverse artefact and
+        # must not be compared with the published triple.
+        "coefficients_identified": rank >= design.shape[1],
+        "design_rank": rank,
+        "design_columns": int(design.shape[1]),
+        "condition_number": float(np.linalg.cond(design)),
+        # The combinations that ARE identified when V == T/M.
+        "gamma_t": float(identified.params[1]),
+        "gamma_m": float(identified.params[2]),
+    }
+    for index, name in enumerate(EOE_TERMS, start=1):
+        fit[name] = float(result.params[index])
+        fit[f"{name}_ci_low"] = float(intervals[index][0])
+        fit[f"{name}_ci_high"] = float(intervals[index][1])
+    return fit
+
+
+@register
+class KampakisLogLinearEoe:
+    spec = _SPECS["kampakis_log_linear_eoe"]
+
+    def estimate(self, frame: pd.DataFrame, params: dict) -> list[Estimate]:
+        window = int(params.get("fit_window_rows", 365))
+        min_fit = int(params.get("min_fit_rows", 180))
+        published = list(params.get("published_beta", [0.88, 0.84, 1.15]))
+        phash = param_set_hash(params)
+
+        out: list[Estimate] = []
+        for position, row in enumerate(frame.itertuples(index=False)):
+            start = max(0, position - window)
+            # iloc[start:position] excludes this row, so no row's own price enters its fit.
+            fit = fit_log_linear_eoe(frame.iloc[start:position], min_fit)
+            if fit is None:
+                out.append(
+                    _refuse(
+                        self.spec,
+                        row,
+                        params,
+                        f"fewer than {min_fit} usable rows in the trailing {window}-row window",
+                    )
+                )
+                continue
+            t = _finite(row.volume_total_usd)
+            m = _finite(row.market_cap_usd)
+            v = _finite(row.velocity_total)
+            if not all(x and x > 0 for x in (t, m, v)):
+                out.append(
+                    _refuse(
+                        self.spec,
+                        row,
+                        params,
+                        "no positive volume, market cap or velocity on this day",
+                    )
+                )
+                continue
+            predicted = float(
+                np.exp(
+                    fit["alpha"]
+                    + fit["beta_t"] * np.log(t)
+                    + fit["beta_m"] * np.log(m)
+                    + fit["beta_inv_v"] * np.log(1.0 / v)
+                )
+            )
+            out.append(
+                Estimate(
+                    symbol=row.symbol,
+                    metric_date=row.metric_date,
+                    method_id=self.spec.method_id,
+                    param_set_hash=phash,
+                    fair_value=predicted,
+                    band_low=None,
+                    band_high=None,
+                    inputs_used={"T": t, "M": m, "V": v, "fit_window_rows": window},
+                    diagnostics={
+                        **fit,
+                        "published_beta": published,
+                        # Declared here because the registry's flag structurally cannot see it.
+                        "structurally_circular": True,
+                        "circularity_note": (
+                            "M is price x supply and V is T / M, so log(price) is regressed on two "
+                            "transforms of log(price); the fit is in part an identity"
+                        ),
                     },
                     applicable=True,
                     panel_vintage_ts=getattr(row, "panel_vintage_ts", None),
