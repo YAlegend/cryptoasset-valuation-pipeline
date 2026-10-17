@@ -979,3 +979,77 @@ def test_main_rejects_an_unknown_score_model(tmp_path, monkeypatch):
         cli, "load_config", lambda: (Settings(data_root=str(tmp_path)), [Asset(symbol="BTC")])
     )
     assert main(["score", "--models", "no_such_model"]) == 2
+
+
+@pytest.mark.parametrize("bad", ["0", "-5", "-1", "7.5", "abc", "", "30,0", "30,"])
+def test_a_bad_horizon_is_refused_at_the_boundary_before_any_work(
+    bad, tmp_path, monkeypatch, capsys
+):
+    """-5 scores a BACKWARD return the lagged features can partly see and writes the result
+    to gold looking like a finding; 0 divides by zero; -1 collides with the sentinel."""
+    monkeypatch.setattr(
+        cli, "load_config", lambda: (Settings(data_root=str(tmp_path)), [Asset(symbol="BTC")])
+    )
+
+    def no_work(_settings):
+        raise AssertionError("a bad horizon must be refused before the warehouse is read")
+
+    monkeypatch.setattr(cli, "_read_score_inputs", no_work)
+    assert main(["score", "--horizons", bad]) == 2
+    err = capsys.readouterr().err
+    assert "positive integer" in err
+    assert not (tmp_path / "gold").exists()
+
+
+def test_a_repeated_horizon_is_collapsed_in_order():
+    assert cli._parse_horizons("30,7,30") == [30, 7]
+
+
+def test_a_repeated_horizon_does_not_duplicate_the_gold_keys(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        cli, "load_config", lambda: (Settings(data_root=str(tmp_path)), [Asset(symbol="BTC")])
+    )
+    inputs = _score_inputs()
+    monkeypatch.setattr(cli, "_read_score_inputs", lambda _settings: inputs)
+    assert main(["score", "--models", "naive_persistence", "--horizons", "30,30"]) == 0
+    written = pd.read_parquet(tmp_path / "gold" / "model_score" / "part-0.parquet")
+    keys = ["model_id", "symbol", "horizon", "fold", "metric"]
+    assert not written.duplicated(subset=keys).any()
+
+
+def test_a_subset_score_run_does_not_delete_the_models_it_did_not_run(tmp_path, monkeypatch):
+    """write_gold replaces the table wholesale, so `score --models <subset>` would otherwise
+    leave the mart holding a fraction of the models with every dbt test still green."""
+    settings = Settings(data_root=str(tmp_path))
+    inputs = _score_inputs()
+    monkeypatch.setattr(cli, "_read_score_inputs", lambda _settings: inputs)
+    gold = pathlib.Path(settings.resolver.table("gold", "model_score")) / "part-0.parquet"
+
+    cli.run_score(settings, [], ["naive_persistence", "historical_mean"], [30])
+    cli.run_score(settings, [], ["naive_persistence", "random_walk_drift"], [30])
+    out = pd.read_parquet(gold)
+
+    assert {"naive_persistence", "historical_mean", "random_walk_drift"} <= set(out["model_id"])
+    keys = ["model_id", "symbol", "horizon", "fold", "metric"]
+    assert not out.duplicated(subset=keys).any()
+    # The correction is recomputed over the MERGED family, not left as the first run's.
+    dm = out[(out["metric"] == "dm_p_value") & out["value"].notna()]
+    count = out[out["metric"] == "hypotheses_tested"]
+    assert len(count) == 1
+    assert count["value"].iloc[0] == len(dm) == 2
+    assert set(out[out["metric"] == "dm_p_value_holm"]["model_id"]) == {
+        "historical_mean",
+        "random_walk_drift",
+    }
+
+
+def test_a_subset_horizon_run_keeps_the_other_horizons(tmp_path, monkeypatch):
+    settings = Settings(data_root=str(tmp_path))
+    inputs = _score_inputs()
+    monkeypatch.setattr(cli, "_read_score_inputs", lambda _settings: inputs)
+    cli.run_score(settings, [], ["naive_persistence"], [30])
+    cli.run_score(settings, [], ["naive_persistence"], [7])
+    out = pd.read_parquet(
+        pathlib.Path(settings.resolver.table("gold", "model_score")) / "part-0.parquet"
+    )
+    assert {7, 30} <= set(out["horizon"])

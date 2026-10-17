@@ -521,6 +521,60 @@ def _read_score_inputs(settings: Settings) -> tuple[pd.DataFrame, pd.DataFrame]:
         con.close()
 
 
+def _parse_horizons(text: str) -> list[int]:
+    """Day horizons from a comma-separated string, positive integers, de-duplicated in order.
+
+    Validated before any work because a bad horizon does not fail, it misleads: -5 makes the
+    target a BACKWARD return the lagged features can partly see, and the run completes with
+    significant-looking rows in gold; 0 divides by zero with no measurement; -1 collides with
+    the horizon = -1 sentinel of the hypothesis-count row; a repeat duplicates every key.
+    """
+    horizons: list[int] = []
+    for raw in text.split(","):
+        try:
+            horizon = int(raw)
+        except ValueError:
+            horizon = 0
+        if horizon < 1:
+            raise ValueError(
+                f"invalid --horizons value {raw!r}: each horizon must be a positive integer "
+                f"number of days (got {text!r})"
+            )
+        if horizon not in horizons:
+            horizons.append(horizon)
+    return horizons
+
+
+def _keep_unrun_scores(
+    settings: Settings, scores: pd.DataFrame, model_ids: list[str], horizons: list[int]
+) -> pd.DataFrame:
+    """Carry forward the (model, horizon) scores this run did not execute.
+
+    Gold is replaced wholesale (io.bronze.write_gold), which is right for a full run and
+    silently destructive for `score --models <subset>` or `--horizons <subset>`: the mart
+    would hold one model of eleven with every dbt test still green, because each passes on a
+    table that is merely incomplete. Same defect, same cure as _keep_unrun_methods.
+
+    Two differences from it. The stored Holm and hypothesis-count rows are DROPPED rather than
+    carried: they are functions of the whole family, so they are recomputed over the merged
+    raw p-values by correct_family_wise (which refuses input that already has them). And a
+    model_id = '*' row (a symbol too short to fold) is per horizon, not per model, so this
+    run's horizons replace it. Carried rows keep their own panel_vintage_ts.
+    """
+    path = pathlib.Path(settings.data_root) / "gold" / "model_score"
+    if not path.exists():
+        return scores
+    stored = pd.read_parquet(path)
+    derived = stored["metric"].isin(["dm_p_value_holm", "hypotheses_tested"])
+    reran = stored["horizon"].isin(horizons) & (
+        stored["model_id"].isin(model_ids) | (stored["model_id"] == "*")
+    )
+    retained = stored[~derived & ~reran]
+    if retained.empty:
+        return scores
+    return pd.concat([retained, scores], ignore_index=True)[SCORE_COLUMNS]
+
+
 def run_score(
     settings: Settings,
     assets: list[Asset],
@@ -531,16 +585,14 @@ def run_score(
     models = {m: SCORING_MODELS[m] for m in model_ids} if model_ids else dict(SCORING_MODELS)
     vintage = panel["panel_vintage_ts"].max() if "panel_vintage_ts" in panel.columns else None
 
+    run_horizons = horizons or list(HORIZONS)
     frames = []
-    for horizon in horizons or list(HORIZONS):
+    for horizon in run_horizons:
         frame = build_frame(panel, estimates, horizon)
         frames.append(run_walk_forward(frame, models, horizon, panel_vintage_ts=vintage))
 
-    scores = correct_family_wise(
-        pd.concat(frames, ignore_index=True)[SCORE_COLUMNS]
-        if frames
-        else pd.DataFrame(columns=SCORE_COLUMNS)
-    )
+    ran = pd.concat(frames, ignore_index=True)[SCORE_COLUMNS]
+    scores = correct_family_wise(_keep_unrun_scores(settings, ran, list(models), run_horizons))
     write_gold(settings.resolver, "model_score", scores)
 
     report: dict[str, dict] = {}
@@ -589,7 +641,11 @@ def main(argv: list[str] | None = None) -> int:
         if unknown:
             print(f"unknown model(s): {unknown}; known: {sorted(SCORING_MODELS)}", file=sys.stderr)
             return 2
-        hs = [int(h) for h in args.horizons.split(",")] if args.horizons else None
+        try:
+            hs = _parse_horizons(args.horizons) if args.horizons is not None else None
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
         for model_id, outcome in sorted(run_score(settings, assets, ids, hs).items()):
             print(model_id, outcome)
         # A model that failed to beat persistence is the expected result (spec 11.3), not
