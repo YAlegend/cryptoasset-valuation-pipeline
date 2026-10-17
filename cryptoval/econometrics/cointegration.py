@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 from statsmodels.tsa.stattools import coint
+from statsmodels.tsa.vector_ar.vecm import coint_johansen
 
 from cryptoval.econometrics.base import Unusable
 
@@ -91,3 +92,29 @@ def _dols(y: np.ndarray, x: np.ndarray) -> tuple[float, float]:
         cov_type="HAC", cov_kwds={"maxlags": maxlags}
     )
     return float(fitted.params[1]), float(fitted.bse[1])
+
+
+def johansen(y: pd.Series, x: pd.Series, lags: int = 1) -> dict[str, float]:
+    """The trace test at rank 0, reported as the second opinion on Engle-Granger.
+
+    Engle-Granger picks one series as the dependent and can give different answers
+    depending on which; Johansen is symmetric in the two. Reporting both is how the
+    chapter says whether the finding survives that choice.
+
+    NOT IN THE HOLM FAMILY, and not exactly sized. det_order=0 leaves the constant
+    unrestricted, whose critical values assume the walks drift. Measured on independent
+    walks (n=2500): 11.5% rejections at drift/sd 0, 9.5% at 0.02, 6% at 0.05 and above.
+    This panel's median drift/sd is 0.018 for log market cap. The restricted-constant
+    alternative is exact at zero drift but rejects 60% at 0.05, so it is worse here.
+    Engle-Granger measured 5-7% over the same range and carries the claim.
+    """
+    y_values, x_values = _aligned(y, x)
+    result = coint_johansen(np.column_stack([y_values, x_values]), det_order=0, k_ar_diff=lags)
+    trace = float(result.lr1[0])
+    critical = float(result.cvt[0, 1])  # column 1 is the 95% critical value
+    return {
+        "trace_statistic": trace,
+        "critical_95": critical,
+        "rank": float(1.0 if trace > critical else 0.0),
+        "n": float(len(y_values)),
+    }

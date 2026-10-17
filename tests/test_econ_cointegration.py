@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 from cryptoval.econometrics.base import Unusable
-from cryptoval.econometrics.cointegration import MIN_COINT_ROWS, engle_granger
+from cryptoval.econometrics.cointegration import MIN_COINT_ROWS, engle_granger, johansen
 
 
 def _cointegrated(n=900, coefficient=2.0, seed=11):
@@ -96,3 +96,30 @@ def test_the_stderr_survives_serially_correlated_equilibrium_errors():
     naive = sm.OLS(y, sm.add_constant(x)).fit().bse[1]
     result = engle_granger(pd.Series(y), pd.Series(x))
     assert result["coefficient_stderr"] > 2.0 * naive
+
+
+def test_johansen_finds_one_cointegrating_relationship_in_a_cointegrated_pair():
+    result = johansen(*_cointegrated())
+    assert result["rank"] == 1
+    assert result["trace_statistic"] > result["critical_95"]
+
+
+# statsmodels casts eigenvalues whose imaginary parts are rounding noise; 200 calls, 200 warnings.
+@pytest.mark.filterwarnings("ignore::numpy.exceptions.ComplexWarning")
+def test_johansen_finds_none_between_independent_walks_at_the_nominal_rate_only():
+    """A size test, not one draw. det_order=0's critical values assume the walks DRIFT;
+    driftless they reject ~12%, so this runs at drift/sd 0.05, the regime the tabulated
+    values are for. The chapter reports the measured size in the other regime."""
+    ranks = []
+    for seed in range(200):
+        rng = np.random.default_rng(seed)
+        y, x = (pd.Series(np.cumsum(rng.normal(0.05, 1.0, 1000))) for _ in range(2))
+        ranks.append(johansen(y, x)["rank"])
+    assert 0.01 <= np.mean(ranks) <= 0.10
+
+
+def test_johansen_refuses_too_few_rows_with_the_count():
+    y, x = _cointegrated(n=MIN_COINT_ROWS - 1)
+    with pytest.raises(Unusable) as exc:
+        johansen(y, x)
+    assert str(MIN_COINT_ROWS - 1) in str(exc.value)
