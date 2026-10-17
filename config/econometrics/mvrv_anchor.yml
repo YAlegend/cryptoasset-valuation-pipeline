@@ -1,0 +1,7 @@
+pair_id: mvrv_anchor
+dependent: log_market_cap
+independent: log_realized_cap
+forced_coefficient: 1.0
+expected_coefficient: null
+params: {lag_criterion: aic, alpha: 0.05}
+citation: "Spec 11.4. MVRV is market cap over realized cap, so its stationarity is this pair with the coefficient forced to 1."
