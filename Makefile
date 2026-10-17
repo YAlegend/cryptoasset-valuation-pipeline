@@ -1,7 +1,7 @@
 PY := .venv/bin/python
 PIP := .venv/bin/pip
 
-.PHONY: setup test test-integration lint fmt ingest backfill validate reconcile seed cards estimate score dbt all
+.PHONY: setup test test-integration lint fmt ingest backfill validate reconcile seed cards estimate score econ dbt all
 
 setup:
 	python3 -m venv .venv
@@ -46,6 +46,9 @@ estimate:
 score:
 	$(PY) -m cryptoval.cli score
 
+econ:
+	$(PY) -m cryptoval.cli econ
+
 dbt:
 	# full-refresh: a seed CSV that gained a column fails to load otherwise
 	cd dbt && ../.venv/bin/dbt seed --full-refresh --profiles-dir . && ../.venv/bin/dbt build --profiles-dir .
@@ -58,5 +61,6 @@ all:
 	$(MAKE) estimate
 	$(MAKE) dbt
 	$(MAKE) score
+	$(MAKE) econ
 	$(MAKE) dbt
 	$(MAKE) validate

@@ -8,11 +8,9 @@ executor who has read the method registry has read this one.
 from __future__ import annotations
 
 import pathlib
-from typing import Any
 
 import yaml
 
-from cryptoval.hashing import stable_hash
 from cryptoval.scoring.base import Model, ModelSpec
 
 # The model every other model is tested against (spec 11.1). Named once so the runner,
@@ -34,10 +32,6 @@ def register(cls: type) -> type:
     """Class decorator: instantiate and register, returning the class unchanged."""
     register_instance(cls())
     return cls
-
-
-def param_set_hash(params: dict[str, Any]) -> str:
-    return stable_hash(params)
 
 
 def load_model_specs(config_dir: str = "config/models") -> dict[str, ModelSpec]:

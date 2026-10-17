@@ -1226,3 +1226,45 @@ def test_each_significant_holm_row_takes_its_own_dm_statistic(tmp_path, monkeypa
 
     assert report["ols"]["beat_baseline_after_holm"] == 1
     assert report["ols"]["lost_to_baseline_after_holm"] == 0
+
+
+def _econ_inputs(days=1200, symbols=("BTC",), seed=4):
+    rng = np.random.default_rng(seed)
+    out = []
+    for symbol in symbols:
+        trend = np.cumsum(rng.normal(0.002, 0.01, days)) + 20.0
+        out.append(
+            pd.DataFrame(
+                {
+                    "symbol": symbol,
+                    "metric_date": pd.date_range("2019-01-01", periods=days, freq="D"),
+                    "market_cap_usd": np.exp(trend + rng.normal(0.0, 0.05, days)),
+                    "realized_cap": np.exp(trend),
+                    "volume_total_usd": np.exp(trend - 3.0),
+                    "active_addresses": np.exp(trend / 2.0),
+                    "panel_vintage_ts": pd.Timestamp("2026-10-12 08:30", tz="UTC"),
+                }
+            )
+        )
+    return pd.concat(out, ignore_index=True)
+
+
+def test_econ_writes_the_documented_columns_to_gold(tmp_path, monkeypatch):
+    from cryptoval.econometrics.runner import TEST_COLUMNS
+
+    settings = Settings(data_root=str(tmp_path))
+    levels_panel = _econ_inputs()
+    monkeypatch.setattr(cli, "_read_econ_inputs", lambda _settings: levels_panel)
+    report = cli.run_econ(settings, [])
+
+    written = pd.read_parquet(
+        pathlib.Path(settings.resolver.table("gold", "econometric_test")) / "part-0.parquet"
+    )
+    assert list(written.columns) == TEST_COLUMNS
+    assert (written["metric"] == "hypotheses_tested").any()
+    assert report["mvrv_anchor"]["rows"] > 0
+
+
+def test_econ_refuses_an_unknown_pair_at_the_cli(capsys):
+    assert cli.main(["econ", "--pairs", "not_a_pair"]) == 2
+    assert "unknown pair" in capsys.readouterr().err

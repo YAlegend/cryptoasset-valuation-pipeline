@@ -17,6 +17,9 @@ from cryptoval.config import Asset, Settings, load_config
 from cryptoval.contracts.checks import check_volume_anomaly, run_checks
 from cryptoval.contracts.identities import run_identity_checks
 from cryptoval.contracts.loader import Contract, load_contract
+from cryptoval.econometrics.registry import PAIRS
+from cryptoval.econometrics.runner import run_pairs
+from cryptoval.econometrics.series import LEVEL_SERIES, build_levels
 from cryptoval.io.bronze import write_bronze, write_gold, write_silver
 from cryptoval.manifest import RunManifest
 from cryptoval.methods.registry import METHODS, run_methods
@@ -613,6 +616,45 @@ def run_score(
     return report
 
 
+def _read_econ_inputs(settings: Settings) -> pd.DataFrame:
+    """The levels panel. Separate from _read_score_inputs: this chapter needs the
+    FUNDAMENTALS in levels and no estimates at all. Patched wholesale in tests."""
+    import duckdb
+
+    con = duckdb.connect(str(pathlib.Path(settings.data_root) / "cryptoval.duckdb"), read_only=True)
+    try:
+        columns = ", ".join(["symbol", "metric_date", "panel_vintage_ts", *LEVEL_SERIES.values()])
+        return con.execute(f"select {columns} from fct_asset_metrics_daily").fetchdf()
+    finally:
+        con.close()
+
+
+def run_econ(
+    settings: Settings, assets: list[Asset], pair_ids: list[str] | None = None
+) -> dict[str, dict]:
+    """The anchoring chain over every pair and symbol, full sample, written to gold."""
+    panel = _read_econ_inputs(settings)
+    specs = {p: PAIRS[p] for p in pair_ids} if pair_ids else dict(PAIRS)
+    vintage = panel["panel_vintage_ts"].max() if "panel_vintage_ts" in panel.columns else None
+
+    # No _keep_unrun equivalent: unlike score, a --pairs subset REPLACES the table. The
+    # pairs are three, a full run takes seconds, and a partial table nobody can detect is
+    # worse than one that is obviously partial.
+    table = run_pairs(build_levels(panel), specs, panel_vintage_ts=vintage)
+    write_gold(settings.resolver, "econometric_test", table)
+
+    report: dict[str, dict] = {}
+    for pair_id, group in table[table["pair_id"] != "*"].groupby("pair_id"):
+        holm = group[(group["metric"] == "cointegration_p_value_holm") & (group["value"] < 0.05)]
+        report[str(pair_id)] = {
+            "rows": int(len(group)),
+            "refusals": int((group["metric"] == "refused").sum()),
+            "symbols": int(group["symbol"].nunique()),
+            "cointegrated_after_holm": int(len(holm)),
+        }
+    return report
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="cryptoval")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -632,6 +674,9 @@ def main(argv: list[str] | None = None) -> int:
     sc = sub.add_parser("score")
     sc.add_argument("--models", help="comma-separated model ids; default every registered model")
     sc.add_argument("--horizons", help="comma-separated day horizons; default 1,7,30,90,365")
+
+    ec = sub.add_parser("econ")
+    ec.add_argument("--pairs", help="comma-separated pair ids; default every registered pair")
 
     args = parser.parse_args(argv)
     settings, assets = load_config()
@@ -664,6 +709,17 @@ def main(argv: list[str] | None = None) -> int:
             print(model_id, outcome)
         # A model that failed to beat persistence is the expected result (spec 11.3), not
         # a failed run.
+        return 0
+
+    if args.command == "econ":
+        ids = [p.strip() for p in args.pairs.split(",")] if args.pairs else None
+        unknown = [p for p in ids or [] if p not in PAIRS]
+        if unknown:
+            print(f"unknown pair(s): {unknown}; known: {sorted(PAIRS)}", file=sys.stderr)
+            return 2
+        for pair_id, outcome in sorted(run_econ(settings, assets, ids).items()):
+            print(pair_id, outcome)
+        # No cointegration found is the expected result, not a failed run.
         return 0
 
     if args.command == "estimate":

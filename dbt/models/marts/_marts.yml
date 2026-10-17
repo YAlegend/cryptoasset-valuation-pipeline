@@ -332,3 +332,25 @@ models:
         description: >
           NULL on a refused row and on a DM test that could not be computed; the reason column
           carries the measurement in both cases.
+  - name: fct_econometric_test
+    description: >
+      The anchoring chain at grain (pair_id, symbol, metric), spec 11.4. Full sample and
+      therefore descriptive: it uses future data by construction, supports no tradability
+      claim, and is not comparable to fct_model_score. pair_id = '*' holds the hypothesis
+      count, taken over the cointegration tests only. A row whose metric is 'refused'
+      carries a NULL value and the measurement that caused it.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [pair_id, symbol, metric]
+    columns:
+      - name: pair_id
+        tests: [not_null]
+      - name: metric
+        tests: [not_null]
+      - name: params_hash
+        description: >
+          stable_hash of the pair's whole spec (series, forced coefficient, params). Re-running
+          after editing a pair's YAML writes rows a reader can tell apart from the old ones --
+          the provenance fct_model_score lacks.
+        tests: [not_null]
