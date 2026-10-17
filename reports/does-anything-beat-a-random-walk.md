@@ -30,11 +30,11 @@ to a price level.
 | Nonlinear (4) | `svr_rbf`, `svr_poly` (degree 2), `feedforward_nn` (64-32 ReLU), `gradient_boosting` (200 trees, depth 3) |
 | Recurrent (1) | `gru` (20-day sequences, 16 hidden units, 30 epochs) |
 
-Every feature is the fair value of one of the registered valuation methods, used as a signal. The registry
-holds **35** methods, **28** of them produced a signal column on this panel, and **27** are tested
-below. What follows is therefore not the registry's full breadth; §6 names the seven methods that
-produced no signal, and §2 the one dropped by the variance screen. The universe
-is 24 assets. **22 can be folded at h of 90 days or less, and 21 at h=365.**
+Every feature is the fair value of one of the registered valuation methods, used as a signal. The
+registry holds **35** methods, **28** of them produced a signal column on this panel, and **27** are
+tested below. What follows is therefore not the registry's full breadth; §6 names the seven methods
+that produced no signal, and §2 the one dropped by the variance screen. The universe is 24 assets.
+**22 can be folded at h of 90 days or less, and 21 at h=365.**
 The two that cannot be folded at all:
 
 | Asset | Rows | Why | Refused at |
