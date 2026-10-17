@@ -16,6 +16,7 @@ from statsmodels.tsa.stattools import coint
 from statsmodels.tsa.vector_ar.vecm import coint_johansen
 
 from cryptoval.econometrics.base import Unusable
+from cryptoval.econometrics.stationarity import MIN_VARIANCE
 
 MIN_COINT_ROWS = 120
 
@@ -41,6 +42,15 @@ def _aligned(
             f"{name}: {len(frame)} usable rows, {MIN_COINT_ROWS} needed for the "
             f"reference distribution"
         )
+    # A flat series has no trend to share; left in, Engle-Granger publishes p ~ 1 with a
+    # coefficient and se of 0, and the system fits raise on a singular matrix.
+    for label, column in (("dependent", "y"), ("independent", "x")):
+        variance = float(np.var(frame[column]))
+        if variance < MIN_VARIANCE:
+            raise Unusable(
+                f"{name}: the {label} series' variance {variance:.3g} is below "
+                f"{MIN_VARIANCE:.0e} on {len(frame)} rows, so it has no trend to share"
+            )
     return frame["y"].to_numpy(dtype="float64"), frame["x"].to_numpy(dtype="float64")
 
 
@@ -108,7 +118,7 @@ def johansen(y: pd.Series, x: pd.Series, lags: int = 1) -> dict[str, float]:
     alternative is exact at zero drift but rejects 60% at 0.05, so it is worse here.
     Engle-Granger measured 5-7% over the same range and carries the claim.
     """
-    y_values, x_values = _aligned(y, x)
+    y_values, x_values = _aligned(y, x, name="johansen")
     result = coint_johansen(np.column_stack([y_values, x_values]), det_order=0, k_ar_diff=lags)
     trace = float(result.lr1[0])
     critical = float(result.cvt[0, 1])  # column 1 is the 95% critical value
@@ -116,5 +126,6 @@ def johansen(y: pd.Series, x: pd.Series, lags: int = 1) -> dict[str, float]:
         "trace_statistic": trace,
         "critical_95": critical,
         "rank": float(1.0 if trace > critical else 0.0),
+        "lags": float(lags),
         "n": float(len(y_values)),
     }

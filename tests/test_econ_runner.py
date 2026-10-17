@@ -141,3 +141,60 @@ def test_the_var_lag_order_is_chosen_by_the_pairs_criterion_and_recorded():
     assert expected > 1  # the fixture really needs more than one lag
     for metric in ("johansen_trace_statistic", "vecm_alpha"):
         assert rows[rows["metric"] == metric]["lags"].iloc[0] == expected
+
+
+def test_both_loadings_and_the_gap_speed_reach_the_table():
+    rows = run_pairs(build_levels(_panel()), SPECS)
+    metrics = set(rows["metric"])
+    assert {"vecm_alpha_independent", "vecm_alpha_independent_stderr", "vecm_gap_speed"} <= metrics
+
+
+def _metric(rows, symbol, name):
+    return rows[(rows["symbol"] == symbol) & (rows["metric"] == name)]
+
+
+def test_the_vecm_gate_reads_the_holm_p_not_the_raw_one(monkeypatch):
+    """Review I4a: ETH's raw p clears 0.05 and its Holm p does not, so it must be refused.
+    The p-values are set, not drawn, so the test cannot pass on a lucky seed."""
+    import cryptoval.econometrics.runner as runner
+
+    raw = {"ADA": 0.5, "BTC": 0.001, "ETH": 0.03, "LTC": 0.5, "XRP": 0.5}
+    in_call_order = iter(raw[s] for s in sorted(raw))  # the runner visits symbols sorted
+    real = runner.engle_granger
+    monkeypatch.setattr(
+        runner, "engle_granger", lambda y, x: {**real(y, x), "p_value": next(in_call_order)}
+    )
+    rows = run_pairs(build_levels(_panel(symbols=tuple(raw))), SPECS)
+
+    assert _metric(rows, "ETH", "cointegration_p_value_holm")["value"].iloc[0] >= 0.05
+    eth = _metric(rows, "ETH", "vecm_alpha")
+    assert eth["value"].isna().all() and "not fitted" in eth["reason"].iloc[0]
+    assert _metric(rows, "BTC", "vecm_alpha")["value"].notna().all()
+
+
+def test_a_constant_fundamental_is_refused_and_the_run_continues():
+    """Review I1: one flat series used to abort the whole run from select_order, after
+    Engle-Granger had already published p=0.96 with a coefficient of 0 and an se of 0."""
+    panel = _panel(symbols=("BTC", "ETH"))
+    panel.loc[panel["symbol"] == "ETH", "realized_cap"] = 5e9
+    rows = run_pairs(build_levels(panel), SPECS)
+    eth = _metric(rows, "ETH", "cointegration_statistic")
+    assert eth["value"].isna().all() and "variance" in eth["reason"].iloc[0]
+    assert _metric(rows, "ETH", "cointegration_p_value").empty
+    assert len(_metric(rows, "BTC", "cointegration_p_value")) == 1
+
+
+def test_a_system_fit_that_raises_is_a_refusal_row_not_a_lost_run(monkeypatch):
+    import cryptoval.econometrics.runner as runner
+
+    def singular(*args, **kwargs):
+        raise np.linalg.LinAlgError("Singular matrix")
+
+    monkeypatch.setattr(runner, "johansen", singular)
+    monkeypatch.setattr(runner, "speed_of_adjustment", singular)
+    rows = run_pairs(build_levels(_panel()), SPECS)
+    for metric in ("johansen_trace_statistic", "vecm_alpha"):
+        refused = rows[rows["metric"] == metric]
+        assert refused["value"].isna().all()
+        assert "LinAlgError: Singular matrix" in refused["reason"].iloc[0]
+    assert (rows["metric"] == "cointegration_p_value_holm").sum() == 1  # the claim survives

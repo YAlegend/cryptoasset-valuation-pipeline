@@ -123,3 +123,16 @@ def test_johansen_refuses_too_few_rows_with_the_count():
     with pytest.raises(Unusable) as exc:
         johansen(y, x)
     assert str(MIN_COINT_ROWS - 1) in str(exc.value)
+
+
+def test_johansen_reports_the_95_percent_value_at_the_lag_it_was_given():
+    """Review I4b/I4d: a size band's lower bound admits a 1% test, and a recorded lag can
+    disagree with the one used. Pin both against a direct call."""
+    from statsmodels.tsa.vector_ar.vecm import coint_johansen
+
+    y, x = _cointegrated()
+    result = johansen(y, x, lags=3)
+    direct = coint_johansen(np.column_stack([y, x]), det_order=0, k_ar_diff=3)
+    assert result["lags"] == 3
+    assert result["critical_95"] == pytest.approx(direct.cvt[0, 1])
+    assert result["trace_statistic"] == pytest.approx(direct.lr1[0])

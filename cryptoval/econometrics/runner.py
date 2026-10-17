@@ -12,6 +12,7 @@ import dataclasses
 import functools
 from typing import Any
 
+import numpy as np
 import pandas as pd
 from statsmodels.tsa.vector_ar.vecm import select_order
 
@@ -36,6 +37,9 @@ TEST_COLUMNS = [
 ]
 
 COUNT_KEYS = {"pair_id": "*", "symbol": "*"}
+
+# What a singular or degenerate system raises from statsmodels; each becomes a refusal row.
+SYSTEM_FIT_ERRORS = (np.linalg.LinAlgError, ValueError)
 
 # The largest VAR order the criterion may choose: two weeks of daily lags.
 MAX_VAR_LAGS = 14
@@ -143,23 +147,38 @@ def run_pairs(
                     _row(symbol=str(symbol), metric=metric, value=eg[key], n_rows=eg["n"], **common)
                 )
 
-            lags = _lag_order(pair, criterion)
-            jo = johansen(pair["y"], pair["x"], lags=lags)
-            for key, metric in (
-                ("trace_statistic", "johansen_trace_statistic"),
-                ("critical_95", "johansen_critical_95"),
-                ("rank", "johansen_rank"),
-            ):
+            # A system fit that raises becomes a refusal row: one singular pair must not lose
+            # the whole run, and the Engle-Granger claim above stands without it.
+            lags: int | None = None
+            try:
+                lags = _lag_order(pair, criterion)
+                jo = johansen(pair["y"], pair["x"], lags=lags)
+            except SYSTEM_FIT_ERRORS as exc:
                 rows.append(
                     _row(
                         symbol=str(symbol),
-                        metric=metric,
-                        value=jo[key],
-                        n_rows=jo["n"],
-                        lags=float(lags),
+                        metric="johansen_trace_statistic",
+                        reason=f"johansen raised {type(exc).__name__}: {exc}",
+                        n_rows=n,
                         **common,
                     )
                 )
+            else:
+                for key, metric in (
+                    ("trace_statistic", "johansen_trace_statistic"),
+                    ("critical_95", "johansen_critical_95"),
+                    ("rank", "johansen_rank"),
+                ):
+                    rows.append(
+                        _row(
+                            symbol=str(symbol),
+                            metric=metric,
+                            value=jo[key],
+                            n_rows=jo["n"],
+                            lags=jo["lags"],
+                            **common,
+                        )
+                    )
 
             tested[(pair_id, str(symbol))] = (pair, common, lags)
 
@@ -193,10 +212,27 @@ def run_pairs(
                 )
             )
             continue
-        vecm = speed_of_adjustment(pair["y"], pair["x"], lags=lags)
+        try:
+            if lags is None:
+                raise ValueError("no lag order, the VAR lag selection itself failed")
+            vecm = speed_of_adjustment(pair["y"], pair["x"], lags=lags)
+        except SYSTEM_FIT_ERRORS as exc:
+            vecm_rows.append(
+                _row(
+                    symbol=symbol,
+                    metric="vecm_alpha",
+                    n_rows=float(len(pair)),
+                    reason=f"vecm raised {type(exc).__name__}: {exc}",
+                    **common,
+                )
+            )
+            continue
         for key, metric in (
             ("alpha", "vecm_alpha"),
             ("alpha_stderr", "vecm_alpha_stderr"),
+            ("alpha_independent", "vecm_alpha_independent"),
+            ("alpha_independent_stderr", "vecm_alpha_independent_stderr"),
+            ("gap_speed", "vecm_gap_speed"),
             ("half_life_days", "vecm_half_life_days"),
         ):
             vecm_rows.append(

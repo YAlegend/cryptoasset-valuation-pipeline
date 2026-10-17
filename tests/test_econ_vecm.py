@@ -64,3 +64,32 @@ def test_an_overshooting_pull_still_has_a_half_life_under_a_day():
     result = speed_of_adjustment(*_mean_reverting(speed=1.5))
     assert -2.0 < result["alpha"] < -1.0  # the fixture really overshoots
     assert 0.0 <= result["half_life_days"] < 1.0
+
+
+def _fundamental_adjusts(n=900, speed=0.1, seed=6):
+    """The mirror of _mean_reverting: market cap is a pure walk and the FUNDAMENTAL closes
+    the gap, so market cap's own alpha is ~0 while the gap still reverts at `speed`."""
+    rng = np.random.default_rng(seed)
+    y = np.cumsum(rng.normal(0.0, 1.0, n))
+    x = np.zeros(n)
+    for t in range(1, n):
+        x[t] = x[t - 1] + (y[t] - y[t - 1]) + speed * (y[t - 1] - x[t - 1]) + rng.normal(0.0, 1.0)
+    return pd.Series(y), pd.Series(x)
+
+
+def test_the_half_life_is_the_gaps_not_market_caps_own():
+    """Review C1: a gap the fundamental closes must not read as 'no reversion'. The half
+    life comes from the gap's speed, beta'alpha, which counts both series' adjustment."""
+    result = speed_of_adjustment(*_fundamental_adjusts(speed=0.1))
+    assert abs(result["alpha"]) < 3.0 * result["alpha_stderr"]  # market cap does not adjust
+    assert result["alpha_independent"] > 3.0 * result["alpha_independent_stderr"]
+    assert abs(result["gap_speed"] + 0.1) < 0.05
+    assert result["half_life_days"] < 10.0  # log(0.5)/log(0.9) is 6.6 days
+
+
+def test_the_half_life_is_log_half_over_log_the_gaps_daily_shrink():
+    """Pins the formula, not just its range: a -log(2)/alpha approximation passes a range."""
+    for fixture in (_mean_reverting(speed=0.3), _mean_reverting(speed=1.5)):
+        result = speed_of_adjustment(*fixture)
+        expected = np.log(0.5) / np.log(abs(1.0 + result["gap_speed"]))
+        assert result["half_life_days"] == pytest.approx(expected)
