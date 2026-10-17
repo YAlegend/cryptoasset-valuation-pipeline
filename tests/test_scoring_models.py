@@ -153,6 +153,14 @@ def test_the_registry_holds_the_ten_models_this_plan_builds():
     assert len(MODELS) == 10
 
 
+# Spread, not error. The failure guarded here is a model that predicts almost nothing (the
+# epsilon tube swallowing every observation). Such a model can post a respectable MAE and even
+# a high correlation while having learned nothing, so the bar reads the spread of predictions.
+# Measured on this fixture, std(predicted) / std(y_test):
+#   working: svr_rbf 0.961, svr_poly 0.994, gradient_boosting 0.973, feedforward_nn 1.268
+#   broken (epsilon 0.1): svr_rbf 0.053, svr_poly 0.146
+# The MLP's MAE ratio to predicting zero is 0.860: weak, not degenerate, and this bar is not
+# meant to catch it. A weak model losing to naive_persistence is a result to report.
 @pytest.mark.parametrize("model_id", NONLINEAR)
 def test_a_nonlinear_model_recovers_a_learnable_signal(model_id):
     X, y = _learnable(n=600)
@@ -161,9 +169,7 @@ def test_a_nonlinear_model_recovers_a_learnable_signal(model_id):
     predicted = model.predict(X[450:])
     assert np.isfinite(predicted).all()
     assert len(predicted) == 150
-    # The linear family's bar, applied here: a model that cannot beat predicting zero has
-    # learned nothing and would appear in the table as a tie with naive_persistence.
-    assert np.mean(np.abs(y[450:] - predicted)) < np.mean(np.abs(y[450:]))
+    assert np.std(predicted) / np.std(y[450:]) > 0.5
 
 
 @pytest.mark.parametrize("model_id", NONLINEAR)
@@ -182,6 +188,15 @@ def test_a_nonlinear_model_with_no_features_refuses(model_id):
     with pytest.raises(Unfittable):
         MODELS[model_id].fit(
             np.zeros((100, 0)), np.zeros(100), {"horizon": 1, "daily_log_return": np.zeros(100)}
+        )
+
+
+@pytest.mark.parametrize("model_id", SKLEARN)
+def test_a_sklearn_model_with_too_few_rows_for_its_features_refuses(model_id):
+    # 3 rows for 3 features needs at least 5 (features + 2); the refusal must come before sklearn.
+    with pytest.raises(Unfittable, match="training rows"):
+        _fresh(model_id).fit(
+            np.zeros((3, 3)), np.zeros(3), {"horizon": 1, "daily_log_return": np.zeros(3)}
         )
 
 
