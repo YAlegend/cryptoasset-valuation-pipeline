@@ -5,6 +5,6 @@ hard way -- a registration list kept in two places drifts -- so there is one cop
 next to the modules it names.
 """
 
-# import cryptoval.scoring.baselines   -- restored in Task 5
+import cryptoval.scoring.baselines  # noqa: F401 -- import registers the family
 # import cryptoval.scoring.linear      -- restored in Task 7
 # import cryptoval.scoring.nonlinear   -- restored in Task 8
