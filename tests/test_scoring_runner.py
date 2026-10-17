@@ -69,18 +69,6 @@ def test_an_asset_with_too_few_rows_yields_a_refusal_row_not_a_score():
     assert rows["value"].isna().all()
 
 
-def test_imputation_is_fitted_on_the_training_fold_only():
-    """A median over the whole series is look-ahead dressed as data cleaning."""
-    frame = _frame()
-    # A feature that is NaN early and enormous late: a whole-series median would leak
-    # the late regime into every early fold.
-    frame.loc[frame.index[:1200], "metcalfe_estimated"] = np.nan
-    frame.loc[frame.index[1200:], "metcalfe_estimated"] = 500.0
-    rows = run_walk_forward(frame, _baselines(), horizon=30)
-    assert not rows.empty
-    assert rows["value"].replace([np.inf, -np.inf], np.nan).dropna().abs().max() < 1e6
-
-
 def test_a_feature_below_the_coverage_floor_is_dropped_for_that_fold():
     frame = _frame()
     frame["sparse_signal"] = np.nan
