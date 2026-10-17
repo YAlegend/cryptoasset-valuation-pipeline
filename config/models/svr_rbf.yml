@@ -1,0 +1,10 @@
+model_id: svr_rbf
+family: nonlinear
+params:
+  kernel: rbf
+  C: 1.0
+  gamma: scale
+  # Default 0.1 is ten times a typical daily log return, so the tube would contain every
+  # observation and the fit would be a flat zero -- scoring identically to the baseline.
+  epsilon: 0.001
+citation: "Spec 11.3, the dissertation's SVR with an RBF kernel, re-run on returns"

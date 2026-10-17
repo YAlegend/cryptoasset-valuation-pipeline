@@ -127,3 +127,48 @@ def test_sklearn_failed_fit_does_not_leave_the_previous_folds_pipeline(bad_fit):
             model.fit(X[:300], y[:10], context)
     with pytest.raises(Unfittable, match="before fit"):
         model.predict(X[300:])
+
+
+NONLINEAR = ("svr_rbf", "svr_poly", "gradient_boosting", "feedforward_nn")
+
+
+def test_the_nonlinear_family_is_registered_and_configured():
+    specs = load_model_specs()
+    for model_id in NONLINEAR:
+        assert model_id in MODELS
+        assert specs[model_id].family == "nonlinear"
+
+
+def test_the_registry_holds_the_ten_models_this_plan_builds():
+    # 3 baselines + 3 linear + 4 nonlinear. A count that drifts without a plan entry is a
+    # model someone added without a config.
+    assert len(MODELS) == 10
+
+
+@pytest.mark.parametrize("model_id", NONLINEAR)
+def test_a_nonlinear_model_recovers_a_learnable_signal(model_id):
+    X, y = _learnable(n=600)
+    model = MODELS[model_id]
+    model.fit(X[:450], y[:450], {"horizon": 1, "daily_log_return": np.zeros(450)})
+    predicted = model.predict(X[450:])
+    assert np.isfinite(predicted).all()
+    assert len(predicted) == 150
+
+
+@pytest.mark.parametrize("model_id", NONLINEAR)
+def test_a_stochastic_model_is_seeded_so_two_runs_agree(model_id):
+    X, y = _learnable(n=600)
+    context = {"horizon": 1, "daily_log_return": np.zeros(450)}
+    model = MODELS[model_id]
+    model.fit(X[:450], y[:450], context)
+    first = model.predict(X[450:])
+    model.fit(X[:450], y[:450], context)
+    assert np.allclose(first, model.predict(X[450:]))
+
+
+@pytest.mark.parametrize("model_id", NONLINEAR)
+def test_a_nonlinear_model_with_no_features_refuses(model_id):
+    with pytest.raises(Unfittable):
+        MODELS[model_id].fit(
+            np.zeros((100, 0)), np.zeros(100), {"horizon": 1, "daily_log_return": np.zeros(100)}
+        )

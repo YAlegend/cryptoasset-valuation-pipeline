@@ -1,0 +1,10 @@
+model_id: svr_poly
+family: nonlinear
+params:
+  kernel: poly
+  degree: 2
+  C: 1.0
+  gamma: scale
+  coef0: 1.0
+  epsilon: 0.001
+citation: "Spec 11.3, the dissertation's SVR with a polynomial kernel, re-run on returns"

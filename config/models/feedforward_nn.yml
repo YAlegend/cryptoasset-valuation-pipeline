@@ -1,0 +1,11 @@
+model_id: feedforward_nn
+family: nonlinear
+params:
+  hidden_layer_sizes: [64, 32]
+  activation: relu
+  solver: adam
+  alpha: 0.001
+  max_iter: 2000
+  early_stopping: false
+  random_state: 20261017
+citation: "Spec 11.3, the dissertation's feed-forward neural network, re-run on returns"

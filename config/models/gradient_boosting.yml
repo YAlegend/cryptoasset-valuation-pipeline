@@ -1,0 +1,9 @@
+model_id: gradient_boosting
+family: nonlinear
+params:
+  n_estimators: 200
+  max_depth: 3
+  learning_rate: 0.05
+  subsample: 0.8
+  random_state: 20261017
+citation: "Spec 11.3, gradient boosting"
