@@ -7,6 +7,10 @@ from cryptoval.scoring.baselines import HistoricalMean, NaivePersistence, Random
 from cryptoval.scoring.registry import MODELS, load_model_specs
 
 LINEAR = ("ols", "ridge", "elastic_net")
+NONLINEAR = ("svr_rbf", "svr_poly", "gradient_boosting", "feedforward_nn")
+# Every model that is a SklearnModel. The guard tests below run over all of them, because a
+# guard verified for one model and assumed for the others is the gap the M4 mutant exposed.
+SKLEARN = LINEAR + NONLINEAR
 
 
 def _learnable(n=400, p=3, seed=20261017):
@@ -104,18 +108,25 @@ def test_naive_persistence_is_exempt_and_predicts_exactly_zero_unfitted():
     assert NaivePersistence().predict(X_ONE).tolist() == [0.0, 0.0, 0.0]
 
 
-# SklearnModel carries the same shape: Task 8 reuses it for four more models.
-def test_sklearn_predict_before_any_fit_refuses_with_unfittable():
+def _fresh(model_id):
+    """A new instance of a registered SklearnModel, so the registered singleton is untouched."""
+    registered = MODELS[model_id]
+    return type(registered)(registered.spec, registered._estimator)
+
+
+@pytest.mark.parametrize("model_id", SKLEARN)
+def test_sklearn_predict_before_any_fit_refuses_with_unfittable(model_id):
     X, y = _learnable()
-    model = type(MODELS["ridge"])(MODELS["ridge"].spec, MODELS["ridge"]._estimator)
+    model = _fresh(model_id)
     with pytest.raises(Unfittable, match="before fit"):
         model.predict(X[:5])
 
 
+@pytest.mark.parametrize("model_id", SKLEARN)
 @pytest.mark.parametrize("bad_fit", ["unfittable", "sklearn_error"])
-def test_sklearn_failed_fit_does_not_leave_the_previous_folds_pipeline(bad_fit):
+def test_sklearn_failed_fit_does_not_leave_the_previous_folds_pipeline(model_id, bad_fit):
     X, y = _learnable()
-    model = type(MODELS["ridge"])(MODELS["ridge"].spec, MODELS["ridge"]._estimator)
+    model = _fresh(model_id)
     context = {"horizon": 1, "daily_log_return": np.zeros(300)}
     model.fit(X[:300], y[:300], context)
     assert model.predict(X[300:]).shape == (100,)
@@ -127,9 +138,6 @@ def test_sklearn_failed_fit_does_not_leave_the_previous_folds_pipeline(bad_fit):
             model.fit(X[:300], y[:10], context)
     with pytest.raises(Unfittable, match="before fit"):
         model.predict(X[300:])
-
-
-NONLINEAR = ("svr_rbf", "svr_poly", "gradient_boosting", "feedforward_nn")
 
 
 def test_the_nonlinear_family_is_registered_and_configured():
@@ -153,6 +161,9 @@ def test_a_nonlinear_model_recovers_a_learnable_signal(model_id):
     predicted = model.predict(X[450:])
     assert np.isfinite(predicted).all()
     assert len(predicted) == 150
+    # The linear family's bar, applied here: a model that cannot beat predicting zero has
+    # learned nothing and would appear in the table as a tie with naive_persistence.
+    assert np.mean(np.abs(y[450:] - predicted)) < np.mean(np.abs(y[450:]))
 
 
 @pytest.mark.parametrize("model_id", NONLINEAR)
@@ -172,3 +183,10 @@ def test_a_nonlinear_model_with_no_features_refuses(model_id):
         MODELS[model_id].fit(
             np.zeros((100, 0)), np.zeros(100), {"horizon": 1, "daily_log_return": np.zeros(100)}
         )
+
+
+def test_the_mlp_does_not_carve_a_random_validation_split_out_of_its_training_data():
+    # scikit-learn's early stopping holds out a RANDOM validation fraction of the training
+    # rows, which the plan's Global Constraints forbid anywhere. A seeded MLP is deterministic
+    # with the flag on as well, so no behavioural test can see it: the config is the thing to pin.
+    assert load_model_specs()["feedforward_nn"].params["early_stopping"] is False
