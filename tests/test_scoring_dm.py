@@ -67,3 +67,28 @@ def test_nan_pairs_are_dropped_and_counted():
     baseline = np.array([0.5, 0.5, np.nan, 0.6] * 50)
     result = diebold_mariano(model, baseline, horizon=1)
     assert result.n == 100
+
+
+def test_hln_correction_shrinks_the_statistic_by_its_factor_where_it_is_large():
+    """At n=50, h=30 the HLN factor is sqrt(0.168) = 0.41: a 59% shrink. Deleting it fails this."""
+    rng = np.random.default_rng(5)  # fixed seed; positive HAC variance at h=30
+    baseline = rng.normal(size=50)
+    model = rng.normal(scale=0.5, size=50)
+    result = diebold_mariano(model, baseline, horizon=30)
+    # Uncorrected statistic: the same Newey-West formula, with the HLN step removed.
+    d = model**2 - baseline**2
+    centred = d - d.mean()
+    gamma = [np.mean(centred**2)] + [np.mean(centred[k:] * centred[:-k]) for k in range(1, 30)]
+    uncorrected = d.mean() / np.sqrt((gamma[0] + 2.0 * sum(gamma[1:])) / 50)
+    assert result.statistic == pytest.approx(uncorrected * 0.168**0.5, rel=1e-6)
+
+
+def test_hln_adjustment_of_zero_is_a_refusal_naming_the_horizon_and_the_adjustment():
+    rng = np.random.default_rng(0)  # fixed seed; positive HAC variance at n=30, h=30
+    baseline = rng.normal(size=30)
+    model = rng.normal(scale=0.5, size=30)
+    # n=30, h=30: (31 - 60 + 29) / 30 == 0 exactly, so the non-positive branch fires.
+    result = diebold_mariano(model, baseline, horizon=30)
+    assert result.statistic is None and result.p_value is None
+    assert "horizon 30" in result.reason
+    assert "0.000e+00" in result.reason
