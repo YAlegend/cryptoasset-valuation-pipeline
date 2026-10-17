@@ -24,7 +24,11 @@ def _p_rows(p_values, model_ids=None, symbols=None, horizons=None) -> pd.DataFra
 
 
 def test_the_hypothesis_count_is_recorded_as_a_row():
-    out = correct_family_wise(_p_rows([0.01, 0.2, 0.5]))
+    rows = _p_rows([0.01, 0.2, 0.5])
+    rmse = rows.iloc[[0]].copy()
+    rmse["metric"] = "rmse"
+    rmse["value"] = 2.5
+    out = correct_family_wise(pd.concat([rows, rmse], ignore_index=True))
     count = out[out["metric"] == "hypotheses_tested"]
     assert len(count) == 1
     assert count["value"].iloc[0] == 3.0
@@ -72,3 +76,17 @@ def test_the_original_rows_are_preserved_alongside_the_corrected_ones():
     out = correct_family_wise(rows)
     assert len(out[out["metric"] == "dm_p_value"]) == 2
     assert list(out.columns) == SCORE_COLUMNS
+
+
+def test_holm_follows_each_p_value_to_its_own_model_when_input_is_shuffled():
+    # Expected values are NOT in input order: b is the smallest p, so it takes the smallest
+    # adjusted value. A sorted-input bug lands the adjusted values on the wrong models here.
+    out = correct_family_wise(_p_rows([0.7, 0.001, 0.3, 0.02], model_ids=["a", "b", "c", "d"]))
+    adjusted = out[out["metric"] == "dm_p_value_holm"].set_index("model_id")["value"]
+    assert list(adjusted[["a", "b", "c", "d"]]) == pytest.approx([0.7, 0.004, 0.6, 0.06])
+
+
+def test_a_second_correction_refuses_rather_than_duplicating_rows():
+    once = correct_family_wise(_p_rows([0.01, 0.2]))
+    with pytest.raises(ValueError, match="2 dm_p_value_holm and 1 hypotheses_tested"):
+        correct_family_wise(once)

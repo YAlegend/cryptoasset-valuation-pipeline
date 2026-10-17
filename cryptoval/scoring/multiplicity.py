@@ -36,6 +36,14 @@ def correct_family_wise(scores: pd.DataFrame, alpha: float = ALPHA) -> pd.DataFr
     evidence warrants, which is a different error from the one 11.6 guards against but an
     error all the same.
     """
+    n_holm = int((scores["metric"] == "dm_p_value_holm").sum())
+    n_count = int((scores["metric"] == "hypotheses_tested").sum())
+    if n_holm or n_count:
+        raise ValueError(
+            f"input already has {n_holm} dm_p_value_holm and {n_count} hypotheses_tested rows; "
+            "the correction was already applied, so re-correct from the raw dm_p_value rows"
+        )
+
     tests = scores[(scores["metric"] == "dm_p_value") & scores["value"].notna()].copy()
     n = int(len(tests))
 
