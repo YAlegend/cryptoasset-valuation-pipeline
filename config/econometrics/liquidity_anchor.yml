@@ -5,7 +5,8 @@ independent: log_volume
 forced_coefficient: 1.0
 expected_coefficient: null
 params: {lag_criterion: aic}
-# NOT NVT. volume_total_usd is EXCHANGE TRADING VOLUME, not on-chain transfer value,
-# which the nvt_golden_ratio method card already declares as an objection. This pair
-# tests market cap against market liquidity, and the chapter must say so.
-citation: "Spec 11.4's NVT question, in the form this panel's data supports: market cap against traded volume."
+# NOT NVT. log_volume is Coin Metrics' volume_reported_spot_usd: EXCHANGE TRADING VOLUME,
+# not on-chain transfer value, which the nvt_golden_ratio method card already declares as
+# an objection. This pair tests market cap against market liquidity, and the chapter must
+# say so. CoinGecko's volume_total_usd is not used: it is a 365-day window on every asset.
+citation: "Spec 11.4's NVT question, in the form this panel's data supports: market cap against Coin Metrics' reported spot volume."

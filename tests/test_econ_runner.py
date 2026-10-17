@@ -30,7 +30,7 @@ def _panel(days=1200, symbols=("BTC",), seed=4):
                     "metric_date": pd.date_range("2019-01-01", periods=days, freq="D"),
                     "market_cap_usd": np.exp(realized + rng.normal(0.0, 0.05, days)),
                     "realized_cap": np.exp(realized),
-                    "volume_total_usd": np.exp(realized - 3.0),
+                    "volume_reported_spot_usd": np.exp(realized - 3.0),
                     "active_addresses": np.exp(realized / 2.0),
                     "panel_vintage_ts": pd.Timestamp("2026-10-12 08:30", tz="UTC"),
                 }

@@ -24,7 +24,7 @@ def _panel(days=1200, symbols=("BTC",), **overrides):
                 "price_usd": np.linspace(100.0, 300.0, days),
                 "market_cap_usd": np.linspace(1e9, 3e9, days),
                 "realized_cap": np.linspace(5e8, 2e9, days),
-                "volume_total_usd": np.linspace(1e7, 5e7, days),
+                "volume_reported_spot_usd": np.linspace(1e7, 5e7, days),
                 "active_addresses": np.linspace(1e4, 5e4, days),
                 "panel_vintage_ts": pd.Timestamp("2026-10-12 08:30", tz="UTC"),
             }
@@ -46,7 +46,7 @@ def test_a_non_positive_value_becomes_nan_rather_than_minus_infinity():
     """Review Focus 1: active_addresses = 0 on a dead day, volume = 0 on an illiquid one."""
     panel = _panel()
     panel.loc[panel.index[5], "active_addresses"] = 0.0
-    panel.loc[panel.index[6], "volume_total_usd"] = -1.0
+    panel.loc[panel.index[6], "volume_reported_spot_usd"] = -1.0
     levels = build_levels(panel)
     assert levels["log_addresses"].isna().iloc[5]
     assert levels["log_volume"].isna().iloc[6]
@@ -99,3 +99,11 @@ def test_a_pair_below_the_row_floor_is_refused_with_the_count():
 def test_a_symbol_absent_from_the_panel_is_refused_not_empty():
     with pytest.raises(Unusable):
         pair_rows(build_levels(_panel()), "ETH", MVRV)
+
+
+def test_log_volume_reads_the_vendor_with_more_than_a_year_of_history():
+    """CoinGecko's volume_total_usd is a 365-day free-tier window on every asset (measured
+    2026-10-17: 363-366 rows each), below MIN_PAIR_ROWS, so the liquidity pair could never
+    run on it. Coin Metrics' reported spot volume is the same quantity, a different
+    construction, with a median 2,798 rows; the two are never coalesced."""
+    assert LEVEL_SERIES["log_volume"] == "volume_reported_spot_usd"

@@ -15,11 +15,12 @@ from cryptoval.scoring.targets import _require_contiguous_days
 
 # Log series name -> the panel column it is the log of. Non-positive values become NaN:
 # an asset with no transactions that day has no log of zero, and -inf in a regression is
-# not a measurement.
+# not a measurement. Volume is Coin Metrics' reported spot volume, not CoinGecko's
+# volume_total_usd, which is a 365-day window on every asset and so below MIN_PAIR_ROWS.
 LEVEL_SERIES: dict[str, str] = {
     "log_market_cap": "market_cap_usd",
     "log_realized_cap": "realized_cap",
-    "log_volume": "volume_total_usd",
+    "log_volume": "volume_reported_spot_usd",
     "log_addresses": "active_addresses",
 }
 
