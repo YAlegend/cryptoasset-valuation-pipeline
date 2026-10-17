@@ -141,3 +141,36 @@ def test_a_late_starting_feature_is_excluded_early_and_included_late():
     assert "late_signal" not in used["BTC|2"]  # 391 of 991: 39%
     assert "late_signal" in used["BTC|4"]  # 1017 of 1617: 63%
     assert all("metcalfe_estimated" in feats for feats in used.values())  # not vacuously empty
+
+
+class _Refuses:
+    spec = ModelSpec(model_id="refuses", family="linear")
+
+    def fit(self, X, y, context):
+        from cryptoval.scoring.base import Unfittable
+
+        raise Unfittable("refuses: 0 features, measured on this fold")
+
+    def predict(self, X):
+        raise AssertionError("predict must not follow a failed fit")
+
+
+class _Defective:
+    spec = ModelSpec(model_id="defective", family="linear")
+
+    def fit(self, X, y, context):
+        raise ValueError("a bug")
+
+    def predict(self, X):
+        raise AssertionError("predict must not follow a failed fit")
+
+
+def test_an_unfittable_model_is_a_refusal_and_a_defective_one_is_model_raised():
+    """The downstream refusals-by-reason query depends on these never being conflated."""
+    models = {**_baselines(), "refuses": _Refuses(), "defective": _Defective()}
+    rows = run_walk_forward(_frame(), models, horizon=30)
+    refused = rows[rows["metric"] == "refused"]
+    reasons = refused.groupby("model_id")["reason"].agg(set)
+    assert reasons["refuses"] == {"refuses: 0 features, measured on this fold"}
+    assert reasons["defective"] == {"model raised ValueError: a bug"}
+    assert refused[refused["model_id"] == "refuses"]["train_rows"].notna().all()

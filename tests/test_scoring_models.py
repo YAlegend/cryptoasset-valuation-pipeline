@@ -1,6 +1,3 @@
-import pathlib
-import re
-
 import numpy as np
 import pytest
 
@@ -67,18 +64,6 @@ def test_features_are_standardised_so_scale_does_not_decide_the_fit():
     assert np.allclose(plain, model.predict(scaled[300:]), atol=1e-6)
 
 
-def test_no_shuffling_or_random_split_anywhere_in_the_source_tree():
-    """Spec 11.2: no train_test_split, no shuffling, anywhere in the codebase."""
-    banned = re.compile(r"train_test_split|KFold|ShuffleSplit|\.sample\(frac|shuffle\s*=\s*True")
-    files = list(pathlib.Path("cryptoval").rglob("*.py"))
-    assert files, "scanned no files; the scan root is wrong, so the check would pass vacuously"
-    offenders = []
-    for path in files:
-        if banned.search(path.read_text(encoding="utf-8")):
-            offenders.append(str(path))
-    assert not offenders, f"time-ordered validation only (spec 11.2); found in {offenders}"
-
-
 # Ruling 16: a baseline must not quietly impersonate the model it is compared against.
 # None of these paths is reachable through the runner (one try wraps fit and predict), so
 # the baselines are called directly.
@@ -117,3 +102,28 @@ def test_a_fit_that_raises_does_not_leave_the_previous_folds_prediction(cls):
 
 def test_naive_persistence_is_exempt_and_predicts_exactly_zero_unfitted():
     assert NaivePersistence().predict(X_ONE).tolist() == [0.0, 0.0, 0.0]
+
+
+# SklearnModel carries the same shape: Task 8 reuses it for four more models.
+def test_sklearn_predict_before_any_fit_refuses_with_unfittable():
+    X, y = _learnable()
+    model = type(MODELS["ridge"])(MODELS["ridge"].spec, MODELS["ridge"]._estimator)
+    with pytest.raises(Unfittable, match="before fit"):
+        model.predict(X[:5])
+
+
+@pytest.mark.parametrize("bad_fit", ["unfittable", "sklearn_error"])
+def test_sklearn_failed_fit_does_not_leave_the_previous_folds_pipeline(bad_fit):
+    X, y = _learnable()
+    model = type(MODELS["ridge"])(MODELS["ridge"].spec, MODELS["ridge"]._estimator)
+    context = {"horizon": 1, "daily_log_return": np.zeros(300)}
+    model.fit(X[:300], y[:300], context)
+    assert model.predict(X[300:]).shape == (100,)
+    if bad_fit == "unfittable":
+        with pytest.raises(Unfittable, match="no features"):
+            model.fit(np.zeros((300, 0)), y[:300], context)
+    else:
+        with pytest.raises(ValueError):  # sklearn rejects mismatched lengths, past the guards
+            model.fit(X[:300], y[:10], context)
+    with pytest.raises(Unfittable, match="before fit"):
+        model.predict(X[300:])

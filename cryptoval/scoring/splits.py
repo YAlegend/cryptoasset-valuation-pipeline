@@ -11,7 +11,7 @@ PURGE drops the h rows before the boundary, whose labels reach across it.
 EMBARGO drops a further buffer, because daily crypto returns are serially correlated and
 adjacency alone carries information past the purge.
 
-No shuffling and no random splitting, anywhere (spec 11.2). Folds are slices into a frame
+No shuffling, no train_test_split, anywhere (spec 11.2). Folds are slices into a frame
 the caller has already sorted by date, which keeps the time ordering a property of the
 data rather than something this module must re-establish.
 """

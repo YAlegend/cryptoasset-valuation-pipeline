@@ -35,9 +35,12 @@ class SklearnModel:
     def __init__(self, spec: ModelSpec, estimator) -> None:
         self.spec = spec
         self._estimator = estimator
-        self._pipeline = make_pipeline(StandardScaler(), estimator)
+        self._pipeline = None  # set only by a fit that succeeds
 
     def fit(self, X: np.ndarray, y: np.ndarray, context: dict[str, Any]) -> None:
+        # Cleared FIRST: a fit that raises must not leave the previous fold's pipeline to
+        # predict as if it were this fold's.
+        self._pipeline = None
         if X.ndim != 2 or X.shape[1] == 0:
             raise Unfittable(
                 f"{self.spec.model_id}: no features cleared the coverage floor on this fold"
@@ -47,10 +50,13 @@ class SklearnModel:
                 f"{self.spec.model_id}: {len(y)} training rows for {X.shape[1]} features"
             )
         # A fresh pipeline per fit, so a fold cannot inherit the previous fold's scaler.
-        self._pipeline = make_pipeline(StandardScaler(), clone(self._estimator))
-        self._pipeline.fit(X, y)
+        pipeline = make_pipeline(StandardScaler(), clone(self._estimator))
+        pipeline.fit(X, y)
+        self._pipeline = pipeline
 
     def predict(self, X: np.ndarray) -> np.ndarray:
+        if self._pipeline is None:
+            raise Unfittable(f"{self.spec.model_id}: predict called before fit succeeded")
         return np.asarray(self._pipeline.predict(X), dtype="float64")
 
 
