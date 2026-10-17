@@ -75,11 +75,12 @@ def test_hln_correction_shrinks_the_statistic_by_its_factor_where_it_is_large():
     baseline = rng.normal(size=50)
     model = rng.normal(scale=0.5, size=50)
     result = diebold_mariano(model, baseline, horizon=30)
-    # Uncorrected statistic: the same Newey-West formula, with the HLN step removed.
+    # Uncorrected statistic: the same Bartlett-weighted Newey-West variance, HLN step removed.
     d = model**2 - baseline**2
     centred = d - d.mean()
     gamma = [np.mean(centred**2)] + [np.mean(centred[k:] * centred[:-k]) for k in range(1, 30)]
-    uncorrected = d.mean() / np.sqrt((gamma[0] + 2.0 * sum(gamma[1:])) / 50)
+    bartlett = sum((1.0 - k / 30) * gamma[k] for k in range(1, 30))
+    uncorrected = d.mean() / np.sqrt((gamma[0] + 2.0 * bartlett) / 50)
     assert result.statistic == pytest.approx(uncorrected * 0.168**0.5, rel=1e-6)
 
 
@@ -92,3 +93,15 @@ def test_hln_adjustment_of_zero_is_a_refusal_naming_the_horizon_and_the_adjustme
     assert result.statistic is None and result.p_value is None
     assert "horizon 30" in result.reason
     assert "0.000e+00" in result.reason
+
+
+def test_hac_lags_are_bartlett_weighted_not_equal_weighted():
+    """Hand-derived. d = [4, 0, 4, 0, ...], n=10, h=3: mean 2, centred +-2.
+    gamma_0 = 4, gamma_1 = -3.6, gamma_2 = 3.2. Bartlett: V = 4 + 2(2/3 * -3.6 + 1/3 * 3.2)
+    = 4/3. HLN adjustment = (11 - 6 + 6/10) / 10 = 0.56. Statistic = 2 / sqrt(4/30) * sqrt(0.56)
+    = sqrt(16.8). The rectangular kernel gives V = 3.2 and sqrt(7) = 2.65: a different answer.
+    """
+    model = np.array([2.0, 0.0] * 5)
+    baseline = np.zeros(10)
+    result = diebold_mariano(model, baseline, horizon=3)
+    assert result.statistic == pytest.approx(16.8**0.5, rel=1e-9)

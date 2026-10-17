@@ -6,7 +6,10 @@ needs are exactly the ones a hand-rolled version omits:
 * HAC VARIANCE. h-step-ahead forecast errors are serially correlated up to lag h-1 by
   construction -- overlapping windows share h-1 days of data. Using the plain sample
   variance of the loss differential understates it, sometimes by an order of magnitude at
-  h=365, and every model then looks significantly better than the baseline.
+  h=365, and every model then looks significantly better than the baseline. The lags are
+  Bartlett-weighted (1 - k/h), not equal-weighted: the equal-weight (rectangular) kernel is
+  not positive semi-definite, and it sent about half the h=90 and h=365 cases into the
+  variance refusal.
 * THE HARVEY-LEYBOURNE-NEWBOLD CORRECTION. The uncorrected statistic over-rejects in small
   samples, which is every sample here. HLN scales it and refers it to a t distribution
   with n-1 degrees of freedom rather than the normal.
@@ -57,12 +60,13 @@ def diebold_mariano(errors_model, errors_baseline, horizon: int, power: int = 2)
     d_bar = float(np.mean(d))
     centred = d - d_bar
 
-    # Newey-West over lags 0..h-1: gamma_0 + 2 * sum gamma_k.
+    # Bartlett-weighted Newey-West over lags 0..h-1: gamma_0 + 2 * sum (1 - k/h) gamma_k.
     gamma_0 = float(np.mean(centred**2))
     variance = gamma_0
     for lag in range(1, min(horizon, n)):
         gamma_k = float(np.mean(centred[lag:] * centred[:-lag]))
-        variance += 2.0 * gamma_k
+        w = 1.0 - lag / horizon
+        variance += 2.0 * w * gamma_k
 
     if not math.isfinite(variance) or variance <= 0.0:
         # Exactly equal losses (d identically zero) is not a difference, and a negative
