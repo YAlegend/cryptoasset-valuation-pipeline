@@ -32,8 +32,11 @@ to a price level.
 
 Every feature is the fair value of one of the registered valuation methods, used as a signal. The registry
 holds **35** methods, and **28** of them produced a signal column on this panel: a method contributes a
-column only where it returns an applicable estimate with a numeric fair value, and 7 returned none
-anywhere in the scored window. What follows therefore tests 27 signals (one more is dropped by the
+column only where it returns an applicable estimate with a numeric fair value, and these 7 returned
+none anywhere in the scored window — `emissions_adjusted_real_yield`, `holding_time_correction`,
+`lppls_bubble_flag`, `nvm_ratio`, `nvt_golden_ratio`, `price_to_utility` and `sector_cohort_zscore`
+(measured on the scored vintage: 35 distinct `method_id` in `fct_valuation_estimate`, 28 with an
+applicable numeric `fair_value`). What follows therefore tests 27 signals (one more is dropped by the
 variance screen below), not the registry's full breadth. The universe
 is 24 assets. **22 can be folded at h of 90 days or less, and 21 at h=365.**
 The two that cannot be folded at all:
