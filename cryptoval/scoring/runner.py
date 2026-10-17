@@ -25,7 +25,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from cryptoval.scoring.base import Model
+from cryptoval.scoring.base import Model, Unfittable
 from cryptoval.scoring.dm import diebold_mariano
 from cryptoval.scoring.metrics import naive_scale, score_all
 from cryptoval.scoring.registry import BASELINE_MODEL_ID
@@ -128,6 +128,22 @@ def run_walk_forward(
                 try:
                     model.fit(x_train, y_train, context)
                     predicted = np.asarray(model.predict(x_test), dtype="float64")
+                except Unfittable as exc:
+                    # A fact about the data, not a defect: recorded with its measurement.
+                    rows.append(
+                        _row(
+                            model_id=model_id,
+                            symbol=str(symbol),
+                            horizon=horizon,
+                            fold=fold.index,
+                            metric="refused",
+                            reason=str(exc),
+                            train_rows=len(labelled),
+                            non_overlapping_windows=report["non_overlapping_windows"],
+                            panel_vintage_ts=panel_vintage_ts,
+                        )
+                    )
+                    continue
                 except Exception as exc:
                     # One broken model must not void a whole run, exactly as in the
                     # method registry: the failure becomes a recorded refusal.

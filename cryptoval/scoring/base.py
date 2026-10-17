@@ -40,3 +40,14 @@ class Model(Protocol):
     def fit(self, X: np.ndarray, y: np.ndarray, context: dict[str, Any]) -> None: ...
 
     def predict(self, X: np.ndarray) -> np.ndarray: ...
+
+
+class Unfittable(Exception):
+    """A model cannot be fitted on this fold, with the measurement that says so.
+
+    Distinct from an arbitrary exception on purpose. The runner records this as a
+    refusal carrying the reason, and anything else as "model raised", because one is a
+    measurement about the data and the other is a defect in the code. A model that
+    swallowed this and returned zeros would be scored as -- and indistinguishable from --
+    the naive_persistence baseline it is being tested against.
+    """

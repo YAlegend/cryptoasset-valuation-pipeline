@@ -1,0 +1,8 @@
+model_id: elastic_net
+family: linear
+params:
+  alpha: 0.001
+  l1_ratio: 0.5
+  max_iter: 5000
+  random_state: 20261017
+citation: "Spec 11.3, elastic net"

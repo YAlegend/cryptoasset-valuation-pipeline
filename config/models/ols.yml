@@ -1,0 +1,4 @@
+model_id: ols
+family: linear
+params: {}
+citation: "Spec 11.3, the dissertation's linear regression, re-run on returns rather than levels"

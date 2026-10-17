@@ -6,5 +6,5 @@ next to the modules it names.
 """
 
 import cryptoval.scoring.baselines  # noqa: F401 -- import registers the family
-# import cryptoval.scoring.linear      -- restored in Task 7
+import cryptoval.scoring.linear  # noqa: F401
 # import cryptoval.scoring.nonlinear   -- restored in Task 8
