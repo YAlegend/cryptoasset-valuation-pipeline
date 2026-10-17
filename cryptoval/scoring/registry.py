@@ -52,6 +52,6 @@ def load_model_specs(config_dir: str = "config/models") -> dict[str, ModelSpec]:
             uses_features=bool(raw.get("uses_features", True)),
         )
         if spec.model_id in specs:
-            raise ValueError(f"duplicate model_id across configs: {spec.model_id}")
+            raise ValueError(f"duplicate model_id {spec.model_id} in {path}")
         specs[spec.model_id] = spec
     return specs

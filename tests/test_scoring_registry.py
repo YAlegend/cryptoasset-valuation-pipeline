@@ -59,8 +59,27 @@ def test_the_three_baselines_are_not_the_same_model_twice():
     assert len(set(predictions)) == 3
 
 
-def test_a_baseline_declares_it_needs_no_features():
-    assert MODELS["naive_persistence"].spec.uses_features is False
+def test_every_baseline_declares_it_needs_no_features():
+    for model_id in ("naive_persistence", "random_walk_drift", "historical_mean"):
+        assert MODELS[model_id].spec.uses_features is False, model_id
+
+
+def test_random_walk_drift_ignores_y_when_the_context_is_unchanged():
+    """Drift is a function of the daily series and h alone; y must not move it."""
+    context = _context(daily=np.full(50, 0.001), horizon=30)
+    model = MODELS["random_walk_drift"]
+    model.fit(np.zeros((50, 1)), np.linspace(-1.0, 1.0, 50), context)
+    first = model.predict(np.zeros((1, 1)))[0]
+    model.fit(np.zeros((50, 1)), np.linspace(5.0, 9.0, 50), context)
+    assert model.predict(np.zeros((1, 1)))[0] == first
+
+
+def test_two_configs_with_the_same_model_id_are_refused(tmp_path):
+    for name in ("a.yml", "b.yml"):
+        (tmp_path / name).write_text("model_id: twin\nfamily: baseline\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="duplicate model_id twin") as excinfo:
+        load_model_specs(str(tmp_path))
+    assert str(tmp_path / "b.yml") in str(excinfo.value)
 
 
 def test_a_duplicate_model_id_is_refused():
