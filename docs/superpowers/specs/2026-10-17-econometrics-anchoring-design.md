@@ -99,8 +99,12 @@ A new `cryptoval/econometrics/` package, mirroring the layering of `cryptoval/sc
 | registry | Pairs are config-driven in `config/econometrics/*.yml`, following `scoring/registry.py`. A pair is data, not a branch in code. |
 
 `cryptoval.cli econ` writes gold; a `fct_econometric_test` mart reads it. `correct_family_wise` is
-reused **unchanged** from `cryptoval/scoring/multiplicity.py` — it already refuses a second pass
-over adjusted p-values, which is the behaviour this plan needs.
+reused from `cryptoval/scoring/multiplicity.py`, **generalized by three keyword arguments whose
+defaults are Plan 4's exact behaviour** (`p_metric`, `columns`, `count_keys`) — it hardcodes
+`dm_p_value` and `SCORE_COLUMNS` today, so it cannot be reused literally unchanged. One
+implementation rather than two matters because the guard that refuses a second pass over adjusted
+p-values lives in it, and `tests/test_cli.py` passing untouched is the proof the generalization
+changed nothing for Plan 4.
 
 **No new dependency.** `statsmodels==0.15.0` is already pinned and carries `adfuller`, `kpss`,
 `coint`, `coint_johansen` and `VECM`.
