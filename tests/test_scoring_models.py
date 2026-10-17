@@ -234,7 +234,7 @@ def test_the_gru_recovers_a_learnable_signal_at_a_qualifying_horizon(horizon):
     predicted = model.predict(X[450:])
     assert np.isfinite(predicted).all()
     assert len(predicted) == 150
-    assert np.std(predicted) / np.std(y[450:]) > 0.3
+    assert np.std(predicted) / np.std(y[450:]) > 0.5
 
 
 def test_the_gru_refuses_a_horizon_without_the_independent_windows_it_needs():
