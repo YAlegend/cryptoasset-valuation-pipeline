@@ -35,6 +35,9 @@ def test_holm_raises_every_p_value_and_never_lowers_one():
     out = correct_family_wise(_p_rows(raw))
     adjusted = out[out["metric"] == "dm_p_value_holm"].sort_values("model_id")["value"].to_numpy()
     assert (adjusted >= np.array(raw)).all()
+    # fdr_bh on this same input gives [0.004, 0.04, 0.4, 0.7]. Monotonicity holds for both, so
+    # these exact Holm values are what separate the family-wise correction 11.6 requires from FDR.
+    assert adjusted == pytest.approx([0.004, 0.06, 0.6, 0.7])
 
 
 def test_holm_matches_its_definition_on_a_worked_example():
