@@ -1,6 +1,7 @@
 import datetime as dt
 import pathlib
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -897,3 +898,84 @@ def test_a_full_estimate_run_still_replaces_everything(tmp_path):
     fresh = pd.DataFrame({"method_id": ["retired"], "symbol": ["BTC"], "fair_value": [2.0]})
     merged = cli._keep_unrun_methods(Settings(data_root=str(tmp_path)), fresh)
     assert merged["fair_value"].tolist() == [2.0]
+
+
+def _score_inputs(days=2000):
+    dates = pd.date_range("2019-01-01", periods=days, freq="D")
+    price = 100.0 * np.exp(np.cumsum(np.full(days, 0.0005)))
+    vintage = pd.Timestamp("2026-10-12 08:30", tz="UTC")
+    panel = pd.DataFrame(
+        {"symbol": "BTC", "metric_date": dates, "price_usd": price, "panel_vintage_ts": vintage}
+    )
+    estimates = pd.DataFrame(
+        {
+            "symbol": "BTC",
+            "metric_date": dates,
+            "method_id": "metcalfe_estimated",
+            "fair_value": price * np.linspace(0.5, 2.0, days),
+            "applicable": True,
+        }
+    )
+    return panel, estimates
+
+
+def test_score_writes_the_documented_columns_to_gold(tmp_path, monkeypatch):
+    from cryptoval.scoring.runner import SCORE_COLUMNS
+
+    settings = Settings(data_root=str(tmp_path))
+    inputs = _score_inputs()
+    monkeypatch.setattr(cli, "_read_score_inputs", lambda _settings: inputs)
+    report = cli.run_score(settings, [], horizons=[30])
+
+    written = pd.read_parquet(
+        pathlib.Path(settings.resolver.table("gold", "model_score")) / "part-0.parquet"
+    )
+    assert list(written.columns) == SCORE_COLUMNS
+    assert (written["metric"] == "hypotheses_tested").any()
+    assert report["naive_persistence"]["rows"] > 0
+    # The vintage ties the scores to the panel state, as fct_valuation_estimate does.
+    stamped = written[written["model_id"] != "*"]["panel_vintage_ts"]
+    assert stamped.notna().all()
+    assert (stamped == inputs[0]["panel_vintage_ts"].max()).all()
+
+
+def test_the_score_reader_selects_the_panel_vintage_from_the_warehouse(tmp_path):
+    """Patching the reader would hide a SELECT that drops the column, and with it the tie
+    between every score and the panel state it was computed from."""
+    import duckdb
+
+    con = duckdb.connect(str(tmp_path / "cryptoval.duckdb"))
+    con.execute(
+        "create table fct_asset_metrics_daily as select 'BTC' as symbol, "
+        "date '2026-10-12' as metric_date, 80000.0 as price_usd, "
+        "timestamp '2026-10-12 08:30:00' as panel_vintage_ts, 1 as unrelated"
+    )
+    con.execute(
+        "create table fct_valuation_estimate as select 'BTC' as symbol, "
+        "date '2026-10-12' as metric_date, 'metcalfe_estimated' as method_id, "
+        "1.0 as fair_value, true as applicable"
+    )
+    con.close()
+
+    panel, estimates = cli._read_score_inputs(Settings(data_root=str(tmp_path)))
+    assert list(panel.columns) == ["symbol", "metric_date", "price_usd", "panel_vintage_ts"]
+    assert panel["panel_vintage_ts"].notna().all()
+    assert "fair_value" in estimates.columns
+
+
+def test_main_exits_zero_when_a_model_loses_to_the_baseline(tmp_path, monkeypatch, capsys):
+    """Failing to beat persistence is the expected result (spec 11.3), not a failed run."""
+    monkeypatch.setattr(
+        cli, "load_config", lambda: (Settings(data_root=str(tmp_path)), [Asset(symbol="BTC")])
+    )
+    inputs = _score_inputs()
+    monkeypatch.setattr(cli, "_read_score_inputs", lambda _settings: inputs)
+    assert main(["score", "--models", "naive_persistence,historical_mean", "--horizons", "30"]) == 0
+    assert "historical_mean" in capsys.readouterr().out
+
+
+def test_main_rejects_an_unknown_score_model(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        cli, "load_config", lambda: (Settings(data_root=str(tmp_path)), [Asset(symbol="BTC")])
+    )
+    assert main(["score", "--models", "no_such_model"]) == 2

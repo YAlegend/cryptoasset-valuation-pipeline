@@ -147,3 +147,22 @@ def test_build_frame_wires_the_target_at_the_requested_horizon():
     frame = build_frame(price, estimates, horizon=7)
     expected = np.log(price["price_usd"].shift(-7) / price["price_usd"])
     np.testing.assert_allclose(frame["y"].to_numpy(), expected.to_numpy(), equal_nan=True)
+
+
+def test_the_frame_carries_the_daily_log_return_the_drift_baseline_needs():
+    price = _price_frame(200)
+    estimates = _estimates(price, "metcalfe_estimated", np.linspace(0.5, 2.0, 200))
+    frame = build_frame(price, estimates, horizon=30)
+    assert "daily_log_return" in frame.columns
+    # It is BACKWARD looking -- log(P[t]/P[t-1]) -- so it is known at t and leaks nothing.
+    expected = np.log(price["price_usd"].iloc[5] / price["price_usd"].iloc[4])
+    assert frame["daily_log_return"].iloc[5] == pytest.approx(expected)
+    assert np.isnan(frame["daily_log_return"].iloc[0])
+
+
+def test_the_daily_log_return_restarts_at_each_symbols_first_row():
+    """Without the groupby, ETH's first row would be priced against BTC's last."""
+    panel = _two_symbol_panel()
+    estimates = _estimates(panel, "mayer_multiple", np.linspace(1.2, 1.8, len(panel)))
+    frame = build_frame(panel, estimates, horizon=7)
+    assert frame.groupby("symbol")["daily_log_return"].head(1).isna().all()

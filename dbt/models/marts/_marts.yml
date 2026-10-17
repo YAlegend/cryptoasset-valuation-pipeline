@@ -310,3 +310,25 @@ models:
         description: >
           False marks a day that lost a component against the day before. A P/TVL built on
           such a day moves for a reason that is not about the protocol.
+
+  - name: fct_model_score
+    description: >
+      Walk-forward scores at grain (model_id, symbol, fold, horizon, metric), spec 8.1 and 11.2.
+      Baselines are ordinary rows, so "did it beat the random walk" is a join rather than a claim.
+      fold = -1 holds values pooled across folds (the DM statistic, its p-value and the Holm
+      adjustment); model_id = '*' with horizon = -1 holds the hypothesis count the family-wise
+      correction was taken over. A row whose metric is 'refused' carries a NULL value and the
+      measurement that caused it.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [model_id, symbol, horizon, fold, metric]
+    columns:
+      - name: model_id
+        tests: [not_null]
+      - name: metric
+        tests: [not_null]
+      - name: value
+        description: >
+          NULL on a refused row and on a DM test that could not be computed; the reason column
+          carries the measurement in both cases.

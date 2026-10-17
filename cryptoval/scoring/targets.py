@@ -112,6 +112,11 @@ def build_frame(panel: pd.DataFrame, estimates: pd.DataFrame, horizon: int) -> p
     out["y"] = out.groupby("symbol", sort=False)["price_usd"].transform(
         lambda s: forward_log_return(s, horizon)
     )
+    # BACKWARD looking, so it is known at t: random_walk_drift estimates its drift from
+    # this and scales it by h. Forward-looking would leak the thing being predicted.
+    out["daily_log_return"] = out.groupby("symbol", sort=False)["price_usd"].transform(
+        lambda s: np.log(s.where(s > 0.0) / s.where(s > 0.0).shift(1))
+    )
 
     dropped: dict[str, str] = {}
     # Full-sample variance is harmless: the 1e-12 floor drops only signals constant on every row.

@@ -119,9 +119,9 @@ def run_walk_forward(
             scale = naive_scale(y_train)
             context = {
                 "horizon": horizon,
-                "daily_log_return": labelled.get(
-                    "daily_log_return", pd.Series(np.zeros(len(labelled)))
-                ).to_numpy(dtype="float64"),
+                # Indexed, not .get(): a missing column must raise. A zero fallback turns
+                # random_walk_drift into naive_persistence and no test would notice.
+                "daily_log_return": labelled["daily_log_return"].to_numpy(dtype="float64"),
             }
 
             for model_id, model in models.items():

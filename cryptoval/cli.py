@@ -12,6 +12,7 @@ import httpx
 import pandas as pd
 
 import cryptoval.methods  # noqa: F401 -- import registers every method family
+import cryptoval.scoring  # noqa: F401 -- import registers every model family
 from cryptoval.config import Asset, Settings, load_config
 from cryptoval.contracts.checks import check_volume_anomaly, run_checks
 from cryptoval.contracts.identities import run_identity_checks
@@ -21,6 +22,10 @@ from cryptoval.manifest import RunManifest
 from cryptoval.methods.registry import METHODS, run_methods
 from cryptoval.quarantine import QUARANTINE_COLUMNS, quarantine_impossible
 from cryptoval.scd2 import current_view, merge_scd2, reconcile_report
+from cryptoval.scoring.multiplicity import correct_family_wise
+from cryptoval.scoring.registry import MODELS as SCORING_MODELS
+from cryptoval.scoring.runner import SCORE_COLUMNS, run_walk_forward
+from cryptoval.scoring.targets import HORIZONS, build_frame
 from cryptoval.sources.coinmetrics import CoinMetricsSource
 from cryptoval.sources.defillama import (
     DefiLlamaHistorySource,
@@ -493,6 +498,63 @@ def run_estimate(
     return report
 
 
+def _read_score_inputs(settings: Settings) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """The price panel and the estimates the signals are built from.
+
+    Separate from _read_panel because scoring needs the ESTIMATES, which the method layer
+    produces and therefore never reads. Patched wholesale in tests.
+    """
+    import duckdb
+
+    con = duckdb.connect(str(pathlib.Path(settings.data_root) / "cryptoval.duckdb"), read_only=True)
+    try:
+        # panel_vintage_ts stamps every score row, as fct_valuation_estimate stamps its own.
+        panel = con.execute(
+            "select symbol, metric_date, price_usd, panel_vintage_ts from fct_asset_metrics_daily"
+        ).fetchdf()
+        estimates = con.execute(
+            "select symbol, metric_date, method_id, fair_value, applicable "
+            "from fct_valuation_estimate"
+        ).fetchdf()
+        return panel, estimates
+    finally:
+        con.close()
+
+
+def run_score(
+    settings: Settings,
+    assets: list[Asset],
+    model_ids: list[str] | None = None,
+    horizons: list[int] | None = None,
+) -> dict[str, dict]:
+    panel, estimates = _read_score_inputs(settings)
+    models = {m: SCORING_MODELS[m] for m in model_ids} if model_ids else dict(SCORING_MODELS)
+    vintage = panel["panel_vintage_ts"].max() if "panel_vintage_ts" in panel.columns else None
+
+    frames = []
+    for horizon in horizons or list(HORIZONS):
+        frame = build_frame(panel, estimates, horizon)
+        frames.append(run_walk_forward(frame, models, horizon, panel_vintage_ts=vintage))
+
+    scores = correct_family_wise(
+        pd.concat(frames, ignore_index=True)[SCORE_COLUMNS]
+        if frames
+        else pd.DataFrame(columns=SCORE_COLUMNS)
+    )
+    write_gold(settings.resolver, "model_score", scores)
+
+    report: dict[str, dict] = {}
+    for model_id, group in scores[scores["model_id"] != "*"].groupby("model_id"):
+        beaten = group[(group["metric"] == "dm_p_value_holm") & (group["value"] < 0.05)]
+        report[str(model_id)] = {
+            "rows": int(len(group)),
+            "refusals": int((group["metric"] == "refused").sum()),
+            "symbols": int(group["symbol"].nunique()),
+            "beat_baseline_after_holm": int(len(beaten)),
+        }
+    return report
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="cryptoval")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -509,6 +571,10 @@ def main(argv: list[str] | None = None) -> int:
         "--methods", help="comma-separated method ids; default every registered method"
     )
 
+    sc = sub.add_parser("score")
+    sc.add_argument("--models", help="comma-separated model ids; default every registered model")
+    sc.add_argument("--horizons", help="comma-separated day horizons; default 1,7,30,90,365")
+
     args = parser.parse_args(argv)
     settings, assets = load_config()
     try:
@@ -516,6 +582,19 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 2
+
+    if args.command == "score":
+        ids = [m.strip() for m in args.models.split(",")] if args.models else None
+        unknown = [m for m in ids or [] if m not in SCORING_MODELS]
+        if unknown:
+            print(f"unknown model(s): {unknown}; known: {sorted(SCORING_MODELS)}", file=sys.stderr)
+            return 2
+        hs = [int(h) for h in args.horizons.split(",")] if args.horizons else None
+        for model_id, outcome in sorted(run_score(settings, assets, ids, hs).items()):
+            print(model_id, outcome)
+        # A model that failed to beat persistence is the expected result (spec 11.3), not
+        # a failed run.
+        return 0
 
     if args.command == "estimate":
         ids = [m.strip() for m in args.methods.split(",")] if args.methods else None

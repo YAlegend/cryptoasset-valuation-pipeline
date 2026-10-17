@@ -1,11 +1,13 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 import cryptoval.scoring  # noqa: F401
 from cryptoval.scoring.base import ModelSpec
 from cryptoval.scoring.registry import MODELS
 from cryptoval.scoring.runner import SCORE_COLUMNS, run_walk_forward
 from cryptoval.scoring.splits import expanding_folds
+from cryptoval.scoring.targets import build_frame
 
 
 def _frame(days: int = 2000, symbols=("BTC",)) -> pd.DataFrame:
@@ -174,3 +176,32 @@ def test_an_unfittable_model_is_a_refusal_and_a_defective_one_is_model_raised():
     assert reasons["refuses"] == {"refuses: 0 features, measured on this fold"}
     assert reasons["defective"] == {"model raised ValueError: a bug"}
     assert refused[refused["model_id"] == "refuses"]["train_rows"].notna().all()
+
+
+def test_a_frame_without_daily_log_return_raises_rather_than_scoring():
+    """A zero fallback would turn random_walk_drift into naive_persistence, unnoticed."""
+    frame = _frame().drop(columns=["daily_log_return"])
+    with pytest.raises(KeyError, match="daily_log_return"):
+        run_walk_forward(frame, _baselines(), horizon=30)
+
+
+def test_random_walk_drift_gets_a_nonzero_drift_from_the_built_frame():
+    """End to end from build_frame: on a steadily rising price the drift model must differ
+    from persistence, and with a constant daily return it predicts the h-day return exactly."""
+    days = 2000
+    price = pd.DataFrame(
+        {
+            "symbol": "BTC",
+            "metric_date": pd.date_range("2019-01-01", periods=days, freq="D"),
+            "price_usd": 100.0 * np.exp(0.001 * np.arange(days)),
+        }
+    )
+    no_estimates = pd.DataFrame(
+        columns=["symbol", "metric_date", "method_id", "fair_value", "applicable"]
+    )
+    frame = build_frame(price, no_estimates, horizon=30)
+    rows = run_walk_forward(frame, _baselines(), horizon=30)
+    scored = rows[(rows["metric"] == "rmse") & (rows["fold"] >= 0)]
+    rmse = scored.groupby("model_id")["value"].mean()
+    assert rmse["naive_persistence"] == pytest.approx(0.03)
+    assert rmse["random_walk_drift"] == pytest.approx(0.0, abs=1e-9)
