@@ -3,7 +3,8 @@
 ONE WRAPPER FOR EVERY SCIKIT-LEARN ESTIMATOR, reused by the nonlinear family. It does
 exactly two things beyond delegating:
 
-* STANDARDISES. The features are log fair-value ratios across 35 methods whose spreads
+* STANDARDISES. The features are log fair-value ratios across the registered methods that
+  produced a signal on the panel, whose spreads
   differ by orders of magnitude; ridge and elastic net penalise coefficients, so without
   a scaler the penalty would fall on whichever signal happens to be measured small. The
   scaler lives inside the pipeline, which is what makes it fitted on the training fold

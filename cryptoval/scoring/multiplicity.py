@@ -14,7 +14,10 @@ claims among the rejections, which answers a different question and would let a 
 of spurious winners through by design.
 
 The family is this plan's own hypotheses. The count is written to the table as a row so
-Plans 4b and 4c can re-correct over the union without re-running anything.
+Plans 4b and 4c can re-correct over the union of families -- from the RAW ``dm_p_value``
+rows, which is all they need from this plan's run. Handing the corrected table back to
+``correct_family_wise`` raises: a second pass over adjusted p-values is not a wider
+family, it is a double correction.
 """
 
 from __future__ import annotations
@@ -69,6 +72,6 @@ def correct_family_wise(scores: pd.DataFrame, alpha: float = ALPHA) -> pd.DataFr
     corrected["value"] = np.asarray(adjusted, dtype="float64")
     corrected["reason"] = f"Holm over {n} hypotheses"
 
-    return pd.concat(
-        [scores, corrected, pd.DataFrame([count_row])], ignore_index=True
-    )[SCORE_COLUMNS]
+    return pd.concat([scores, corrected, pd.DataFrame([count_row])], ignore_index=True)[
+        SCORE_COLUMNS
+    ]

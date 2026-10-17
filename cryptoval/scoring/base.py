@@ -28,8 +28,10 @@ class ModelSpec:
     family: str  # baseline | linear | nonlinear | recurrent
     params: dict[str, Any] = field(default_factory=dict)
     citation: str = ""
-    # False for a model that ignores X entirely. The runner skips feature imputation for
-    # it, so a baseline is scorable on an asset with no usable signals at all.
+    # False for a model that ignores X entirely. DECLARATIVE ONLY: the runner imputes and
+    # selects features for every model and does not read this flag, so it documents a
+    # model's contract and must not be cited as the reason a baseline is scorable on an
+    # asset with no usable signals -- that holds because the baselines never touch X.
     uses_features: bool = True
 
 

@@ -58,9 +58,7 @@ class _Boom:
 def test_run_ingest_records_a_failure_without_raising(tmp_path, monkeypatch):
     monkeypatch.setitem(SOURCES, "coinmetrics", _Boom("HTTP 503"))
     settings = Settings(data_root=str(tmp_path))
-    report = run_ingest(
-        settings, [], ["coinmetrics"], dt.date(2026, 10, 1), dt.date(2026, 10, 11)
-    )
+    report = run_ingest(settings, [], ["coinmetrics"], dt.date(2026, 10, 1), dt.date(2026, 10, 11))
     assert report["coinmetrics"]["status"] == "failed"
     assert "503" in report["coinmetrics"]["error"]
     manifest = (tmp_path / "gold" / "run_manifest.jsonl").read_text()
@@ -156,9 +154,7 @@ def test_a_null_key_is_recorded_as_a_failed_run_not_filtered(tmp_path, monkeypat
     frame.loc[0, "asset"] = None
     monkeypatch.setitem(SOURCES, "coinmetrics", _Fixed(frame))
     settings = Settings(data_root=str(tmp_path))
-    report = run_ingest(
-        settings, [], ["coinmetrics"], dt.date(2026, 10, 1), dt.date(2026, 10, 11)
-    )
+    report = run_ingest(settings, [], ["coinmetrics"], dt.date(2026, 10, 1), dt.date(2026, 10, 11))
     assert report["coinmetrics"]["status"] == "failed"
     assert "null" in report["coinmetrics"]["error"]
     assert not (tmp_path / "silver" / "asset_metrics").exists()
@@ -182,8 +178,11 @@ def test_cli_help_returns_zero():
 
 
 def test_duplicate_symbols_are_rejected():
-    assets = [Asset(symbol="BTC", cm_id="btc"), Asset(symbol="ETH", cm_id="eth"),
-              Asset(symbol="BTC", cm_id="btc2")]
+    assets = [
+        Asset(symbol="BTC", cm_id="btc"),
+        Asset(symbol="ETH", cm_id="eth"),
+        Asset(symbol="BTC", cm_id="btc2"),
+    ]
     with pytest.raises(ValueError, match="BTC"):
         cli.assert_unique_symbols(assets)
 
@@ -239,7 +238,11 @@ def _llama_frame(rows):
 # scope; the scoping behaviour itself is pinned by the two tests that follow.
 _UNIVERSE = [
     Asset(
-        symbol="UNI", sector="defi", consensus="other", cm_id="uni", gecko_id="uniswap",
+        symbol="UNI",
+        sector="defi",
+        consensus="other",
+        cm_id="uni",
+        gecko_id="uniswap",
         defillama_slugs=("A", "B", "small", "huge"),
     ),
     Asset(symbol="BTC", sector="store_of_value", consensus="pow", cm_id="btc", gecko_id="bitcoin"),
@@ -280,10 +283,16 @@ def test_validate_ignores_superseded_history_rows(tmp_path, monkeypatch):
     # A revision leaves a closed row behind; uniqueness must apply to the current view.
     r = PathResolver(str(tmp_path))
     key = ["asset", "metric_date"]
-    first = merge_scd2(pd.DataFrame(), _cm_frame(100.0), key, ["CapMrktCurUSD"],
-                       dt.datetime(2026, 10, 10, tzinfo=dt.UTC))
-    second = merge_scd2(first, _cm_frame(120.0), key, ["CapMrktCurUSD"],
-                        dt.datetime(2026, 10, 11, tzinfo=dt.UTC))
+    first = merge_scd2(
+        pd.DataFrame(),
+        _cm_frame(100.0),
+        key,
+        ["CapMrktCurUSD"],
+        dt.datetime(2026, 10, 10, tzinfo=dt.UTC),
+    )
+    second = merge_scd2(
+        first, _cm_frame(120.0), key, ["CapMrktCurUSD"], dt.datetime(2026, 10, 11, tzinfo=dt.UTC)
+    )
     write_silver(r, "asset_metrics", second)
     settings = _validate_settings(tmp_path, monkeypatch, "coinmetrics")
     assert [f for f in run_validate(settings, _UNIVERSE).failures if "uniqueness" in f] == []
@@ -331,9 +340,7 @@ class _Partial:
 def test_run_ingest_keeps_partial_rows_and_records_the_status_and_error(tmp_path, monkeypatch):
     monkeypatch.setitem(SOURCES, "coingecko", _Partial())
     settings = Settings(data_root=str(tmp_path))
-    report = run_ingest(
-        settings, [], ["coingecko"], dt.date(2026, 10, 1), dt.date(2026, 10, 11)
-    )
+    report = run_ingest(settings, [], ["coingecko"], dt.date(2026, 10, 1), dt.date(2026, 10, 11))
     assert report["coingecko"]["status"] == "partial"
     assert report["coingecko"]["errors"] == ["ethereum: 429 Too Many Requests"]
     silver = pd.read_parquet(tmp_path / "silver" / "market_chart" / "part-0.parquet")
@@ -397,9 +404,7 @@ def test_validate_flags_an_anomalous_coingecko_volume(tmp_path, monkeypatch):
     assert anomalies[0].startswith("market_chart/volume_anomaly[bitcoin:volume_usd]: ")
 
 
-def test_main_exits_zero_and_prints_warn_when_validation_only_warns(
-    tmp_path, monkeypatch, capsys
-):
+def test_main_exits_zero_and_prints_warn_when_validation_only_warns(tmp_path, monkeypatch, capsys):
     """Ruling J: an anomaly is a signal to investigate, not proof the data is invalid.
     A real market event (BCH's fork day, +246x) is indistinguishable by ratio from the
     vendor's impossible values, so the ratio warns and the range maximum blocks."""
@@ -503,9 +508,7 @@ def test_ingest_quarantines_an_impossible_value_before_it_reaches_silver(tmp_pat
     assert quarantine["column"].iloc[0] == "volume_reported_spot_usd_1d"
 
 
-def test_reconcile_does_not_report_a_quarantined_cell_as_a_revision(
-    tmp_path, monkeypatch, capsys
-):
+def test_reconcile_does_not_report_a_quarantined_cell_as_a_revision(tmp_path, monkeypatch, capsys):
     """Silver stores the nulled cell; the fresh fetch still carries the impossible raw value.
     Reconcile must clean the fetch the same way, or that cell reads as a revision on every
     run and buries the real ones (spec 8.2). A genuine revision must still show."""
@@ -554,7 +557,11 @@ def test_an_unmapped_protocols_failure_warns_while_a_mapped_one_blocks(tmp_path)
     hold the build hostage, and a real defect in a valuation input must still stop it."""
     settings = Settings(data_root=str(tmp_path))
     uni = Asset(
-        symbol="UNI", sector="defi", consensus="other", cm_id="uni", gecko_id="uniswap",
+        symbol="UNI",
+        sector="defi",
+        consensus="other",
+        cm_id="uni",
+        gecko_id="uniswap",
         defillama_slugs=("Uniswap V3",),
     )
 
@@ -568,19 +575,33 @@ def test_an_unmapped_protocols_failure_warns_while_a_mapped_one_blocks(tmp_path)
 
     # A negative GROSS fee is a vendor error the contract blocks -- but on a protocol we
     # never value, so it is only a warning.
-    _write([
-        {"protocol": "Lombard LBTC", "metric_date": pd.Timestamp("2026-10-11", tz="UTC"),
-         "total_fees_24h": -23915.0, "total_fees_30d": 1581269.0, "net_revenue_24h": -1913.0},
-    ])
+    _write(
+        [
+            {
+                "protocol": "Lombard LBTC",
+                "metric_date": pd.Timestamp("2026-10-11", tz="UTC"),
+                "total_fees_24h": -23915.0,
+                "total_fees_30d": 1581269.0,
+                "net_revenue_24h": -1913.0,
+            },
+        ]
+    )
     report = cli.run_validate(settings, [uni])
     assert not [f for f in report.failures if "protocol_revenue/ranges" in f]
     assert [w for w in report.warnings if "protocol_revenue/ranges" in w]
 
     # The same defect on a MAPPED protocol blocks.
-    _write([
-        {"protocol": "Uniswap V3", "metric_date": pd.Timestamp("2026-10-11", tz="UTC"),
-         "total_fees_24h": -450744.0, "total_fees_30d": 1.2e7, "net_revenue_24h": 92267.0},
-    ])
+    _write(
+        [
+            {
+                "protocol": "Uniswap V3",
+                "metric_date": pd.Timestamp("2026-10-11", tz="UTC"),
+                "total_fees_24h": -450744.0,
+                "total_fees_30d": 1.2e7,
+                "net_revenue_24h": 92267.0,
+            },
+        ]
+    )
     report = cli.run_validate(settings, [uni])
     assert [f for f in report.failures if "protocol_revenue/ranges" in f]
 
@@ -598,9 +619,7 @@ def test_scoping_leaves_equities_blocking():
     assert "equities" not in cli.SCOPE_KEY
 
 
-def test_an_empty_mapping_warns_rather_than_silently_passing_every_protocol(
-    tmp_path, monkeypatch
-):
+def test_an_empty_mapping_warns_rather_than_silently_passing_every_protocol(tmp_path, monkeypatch):
     """With no defillama_slugs anywhere every protocol is unmapped; that is correct but
     would hide a defect from an operator who forgot the mapping, so say so."""
     rows = [("Lombard LBTC", f"2026-10-0{d}", 100.0) for d in range(1, 4)]
@@ -859,9 +878,18 @@ def test_read_panel_widens_against_the_real_marts(tmp_path, monkeypatch):
 
     wide = cli._read_panel(Settings(data_root=str(tmp_path)))
     assert len(wide) == 1
-    for column in ("total_fees_usd", "net_revenue_usd", "revenue_regime", "protocol_count",
-                   "tvl_usd", "total_supply", "max_supply", "supply_as_of", "sector",
-                   "genesis_date"):
+    for column in (
+        "total_fees_usd",
+        "net_revenue_usd",
+        "revenue_regime",
+        "protocol_count",
+        "tvl_usd",
+        "total_supply",
+        "max_supply",
+        "supply_as_of",
+        "sector",
+        "genesis_date",
+    ):
         assert column in wide.columns, column
     # protocol_count came from the revenue mart alone; the TVL mart's copy is not selected.
     assert "protocol_count_x" not in wide.columns
@@ -1156,3 +1184,45 @@ def test_a_significant_loss_to_persistence_is_not_counted_as_a_win(tmp_path, mon
     assert report["feedforward_nn"]["lost_to_baseline_after_holm"] == int(
         ((holm < 0.05) & (stat > 0)).sum()
     )
+
+
+def test_each_significant_holm_row_takes_its_own_dm_statistic(tmp_path, monkeypatch):
+    """The sign must come from a KEYED join. The significant cells are not always a prefix
+    of the tested ones, so lining the two up positionally gives one cell's verdict another
+    cell's sign -- the mis-attribution that printed "beats" for losses in the live run.
+    Crafted rather than fitted: in every end-to-end fixture every cell is significant, and
+    there positional and keyed alignment cannot be told apart.
+    """
+    from cryptoval.scoring.runner import SCORE_COLUMNS
+
+    def _crafted_row(horizon, metric, value):
+        row = dict.fromkeys(SCORE_COLUMNS)
+        row.update(
+            model_id="ols",
+            symbol="BTC",
+            horizon=horizon,
+            fold=-1,
+            metric=metric,
+            value=value,
+            panel_vintage_ts=pd.Timestamp("2026-10-12 08:30", tz="UTC"),
+        )
+        return row
+
+    # h=30 is NOT significant and its statistic is positive; h=90 is significant and beat
+    # persistence. Only the h=90 row is a verdict, and its sign is -3.0, not 5.0.
+    crafted = pd.DataFrame(
+        [
+            _crafted_row(30, "dm_p_value_holm", 0.9),
+            _crafted_row(90, "dm_p_value_holm", 0.01),
+            _crafted_row(30, "dm_statistic", 5.0),
+            _crafted_row(90, "dm_statistic", -3.0),
+        ]
+    )[SCORE_COLUMNS]
+
+    settings = Settings(data_root=str(tmp_path))
+    monkeypatch.setattr(cli, "_read_score_inputs", lambda _settings: _score_inputs())
+    monkeypatch.setattr(cli, "correct_family_wise", lambda scores, **kwargs: crafted)
+    report = cli.run_score(settings, [], ["naive_persistence"], [30])
+
+    assert report["ols"]["beat_baseline_after_holm"] == 1
+    assert report["ols"]["lost_to_baseline_after_holm"] == 0

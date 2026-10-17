@@ -81,8 +81,23 @@ def test_a_feature_below_the_coverage_floor_is_dropped_for_that_fold():
 
 
 def test_two_symbols_are_scored_independently():
-    rows = run_walk_forward(_frame(symbols=("BTC", "ETH")), _baselines(), horizon=30)
-    assert set(rows["symbol"]) == {"BTC", "ETH"}
+    """Pooling the panel is the leak here, and the symptom is every asset scoring alike:
+    each symbol's scores must equal what scoring that symbol ALONE produces."""
+    frame = _frame(symbols=("BTC", "ETH"))
+    both = run_walk_forward(frame, _baselines(), horizon=30)
+    assert set(both["symbol"]) == {"BTC", "ETH"}
+
+    key = ["model_id", "symbol", "fold", "horizon", "metric"]
+    alone = run_walk_forward(frame[frame["symbol"] == "ETH"].copy(), _baselines(), horizon=30)
+    merged = both[both["symbol"] == "ETH"].merge(alone, on=key, suffixes=("_both", "_alone"))
+    assert len(merged) == len(alone)
+    pd.testing.assert_series_equal(merged["value_both"], merged["value_alone"], check_names=False)
+
+    # Not vacuous: the two symbols draw different series, so their scores must differ.
+    assert not np.allclose(
+        both[(both["symbol"] == "BTC") & (both["metric"] == "mae")]["value"].to_numpy(),
+        both[(both["symbol"] == "ETH") & (both["metric"] == "mae")]["value"].to_numpy(),
+    )
 
 
 class _FeatureSpy:

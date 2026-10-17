@@ -30,7 +30,11 @@ to a price level.
 | Nonlinear (4) | `svr_rbf`, `svr_poly` (degree 2), `feedforward_nn` (64-32 ReLU), `gradient_boosting` (200 trees, depth 3) |
 | Recurrent (1) | `gru` (20-day sequences, 16 hidden units, 30 epochs) |
 
-Every feature is the fair value of one of the registered valuation methods, used as a signal. The universe
+Every feature is the fair value of one of the registered valuation methods, used as a signal. The registry
+holds **35** methods, and **28** of them produced a signal column on this panel: a method contributes a
+column only where it returns an applicable estimate with a numeric fair value, and 7 returned none
+anywhere in the scored window. What follows therefore tests 27 signals (one more is dropped by the
+variance screen below), not the registry's full breadth. The universe
 is 24 assets. **22 can be folded at h of 90 days or less, and 21 at h=365.**
 The two that cannot be folded at all:
 
@@ -316,7 +320,7 @@ One row per gap, each with its measurement.
 
 | Spec | What is not here | Why |
 |---|---|---|
-| §11.3 | The recurrent model at h=365 | **The GRU is built and runs at four horizons (1, 7, 30, 90).** It refuses h=365, naming its measurement: counting the assets, of 24, that clear both >=5 folds and >=30 non-overlapping windows (measured on the 2026-10-14 panel vintage) gave, at h=1: 22, h=7: 22, h=30: 22, h=90: 11, h=365: 0, against a threshold of 8 stated in advance. The mart carries 105 refused rows for it across 21 assets, each reading: *gru: h=365 lacks the independent observations a recurrent model needs; only 0 of 24 assets cleared >=5 folds and >=30 non-overlapping windows (measured 2026-10-17 on the 2026-10-14 panel vintage; qualifying horizons: [1, 7, 30, 90])* |
+| §11.3 | The recurrent model at h=365 | **The GRU is built and runs at four horizons (1, 7, 30, 90).** It refuses h=365, naming its measurement: counting the assets, of 24, that clear both >=5 folds and >=30 non-overlapping windows (measured on the 2026-10-14 panel vintage) gave, at h=1: 22, h=7: 22, h=30: 22, h=90: 11, h=365: 0, against a threshold of 8 stated in advance. The mart carries 105 refused rows for it across 21 assets, each reading: *gru: h=365 lacks the independent observations a recurrent model needs; only 0 of 24 assets cleared >=5 folds and >=30 non-overlapping windows (measured 2026-10-17 on the 2026-10-14 panel vintage; qualifying horizons: [1, 7, 30, 90])*. **The gate is per horizon, not per asset**, so once h=90 qualified on 11 assets the GRU was fitted on all 22 foldable ones — the other eleven failing the >=30-window half of the criterion, and §3's table puts the h=90 minimum at 12.1 windows. Its h=90 column should not be read as comparable to its h=1 column, where all 22 cleared. |
 | §11.2 | Tuned hyperparameters | No inner cross-validation. An honest tuning loop needs a nested walk-forward inside each training fold, and the fold counts in §3 show the folds are not there to spare (at h=365, 5.1 to 11.8 independent windows per asset). Every model runs at the stated config values, so these are scores for *a* parameterisation, not for the best one. |
 | §11.4 | ADF/KPSS, cointegration, VECM, GARCH, Markov-switching, DCC | Plan 4b. Needs `arch` plus a hand-rolled DCC estimator; answers a different question and writes a different table. |
 | §11.5 | Factor models, Fama-MacBeth, decile portfolios | Plan 4c, which must first resolve the point-in-time top-N universe §5 and §11.5 both require and no free source serves. That point is **unresolved**. |
@@ -401,5 +405,6 @@ python -m cryptoval.cli score                # 11 models x 22 foldable assets x 
 make dbt                                     # fct_model_score and its uniqueness test
 ```
 
-`make all` now runs `score` between the two `dbt` builds, as a recipe, because `make` runs a
-prerequisite listed twice only once.
+`make all` now runs three `dbt` builds with `score` between the second and the third — the third is
+what builds `fct_model_score` from the gold table `score` has just written. It is written as a
+recipe, because `make` runs a prerequisite listed twice only once.
