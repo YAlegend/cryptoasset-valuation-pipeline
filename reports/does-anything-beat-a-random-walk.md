@@ -114,8 +114,9 @@ training fold**, the error of forecasting no return):
 | historical_mean | 0.748 | 0.735 | 0.728 | 0.778 | 0.761 |
 
 Note what that table does *not* say. MASE below 1.0 is not the bar, because persistence itself
-scores below 1.0 everywhere (the test blocks are calmer than the training blocks they are scaled
-by, most of all at h=365). The bar is persistence's own row. The two other baselines
+scores below 1.0 everywhere. That means its test-block errors are smaller than the mean absolute
+return of the training folds it is scaled by; why is not measured here (a reading, not a test: the
+test blocks may simply be calmer than the training blocks). The bar is persistence's own row. The two other baselines
 score above it in every column, and tested against it they never win; after Holm
 `historical_mean` loses on 1 test(s) and
 `random_walk_drift` on 0:
@@ -142,8 +143,8 @@ as few as 5.1 for the shortest-history asset that is scored, against
 thousands at h=1. It is reported, but it is not comparable to a h=1 result and should not be read as
 though it were.
 
-**A kernel caveat the p-values at h=365 must carry.** Task 4 measured how the Bartlett statistic
-compares with the rectangular one it replaced, on simulated errors: where the pooled test-row count
+**A kernel caveat the p-values at h=365 must carry.** A simulation (500 draws per cell, run during the build) compared the Bartlett statistic
+with the rectangular one it replaced: where the pooled test-row count
 is close to the horizon (n/h of about 1.4) the Bartlett statistic runs about **1.5x** the
 rectangular one. That ratio was measured at n/h of 1.4 and *not* at 2 to 3, so how much of any
 given h=365 figure is the kernel is unknown. The pooled n for every DM test is therefore printed
@@ -189,11 +190,11 @@ By horizon:
 
 | h | DM tests | p-value returned | refused | raw p<0.05 | Holm p<0.05 | beat persistence (Holm) | negative statistic, any p | min pooled n/h |
 |---|---|---|---|---|---|---|---|---|
-| 1 | 220 | 220 | 0 | 179 | 154 | 0 | 5.0000 | 708 |
-| 7 | 220 | 220 | 0 | 185 | 156 | 0 | 4.0000 | 99.43 |
-| 30 | 220 | 220 | 0 | 179 | 113 | 0 | 7.0000 | 21.67 |
-| 90 | 220 | 220 | 0 | 147 | 29 | 0 | 11.0000 | 5.89 |
-| 365 | 189 | 189 | 0 | 34 | 5 | 0 | 19.0000 | 2.07 |
+| 1 | 220 | 220 | 0 | 179 | 154 | 0 | 5 | 708.00 |
+| 7 | 220 | 220 | 0 | 185 | 156 | 0 | 4 | 99.43 |
+| 30 | 220 | 220 | 0 | 179 | 113 | 0 | 7 | 21.67 |
+| 90 | 220 | 220 | 0 | 147 | 29 | 0 | 11 | 5.89 |
+| 365 | 189 | 189 | 0 | 34 | 5 | 0 | 19 | 2.07 |
 
 And the Holm survivors by model and horizon (all losses to persistence):
 
@@ -214,9 +215,9 @@ Where the point estimate favoured a model at all (a negative statistic), it was 
 1,069, and the strongest of them was `random_walk_drift` on LDO at h=365:
 statistic -1.575, raw p = 0.116, pooled n = 754 (n/h
 2.07). That is a baseline, on the asset-horizon with the least data, and
-it is nowhere near significant. **Nothing here beat persistence, so there is nothing to check for
-leakage. The leak that would manifest as a model beating persistence is absent from the output;
-that is evidence about the code as well as about the market.**
+it is nowhere near significant. **Nothing here beat persistence, which removes the one signal that would have prompted a
+leak investigation. A null result is weak evidence against a leak, not proof of its absence: the
+protocol's guards (§2) are what carry that claim.**
 
 The h=365 survivors, with the pooled n each rests on (see the kernel caveat in §3):
 
@@ -241,17 +242,17 @@ fold is compared on the folds it scored):
 | ETH | 2,981 | 8.17 | 11.2 | 7 | 0 | 0.0002 |
 | BNB | 2,273 | 6.23 | 9.3 | 0 | 0 | 0.0845 |
 | BCH | 2,257 | 6.18 | 9.2 | 0 | 0 | 0.0650 |
-| MANA | 2,232 | 6.12 | 9.1 | 3 | 1 | 0.0e+00 |
+| MANA | 2,232 | 6.12 | 9.1 | 3 | 1 | 2.2e-05 |
 | LINK | 2,197 | 6.02 | 9 | 2 | 0 | 0.0269 |
 | ADA | 2,135 | 5.85 | 8.9 | 2 | 0 | 0.0004 |
 | MKR | 2,108 | 5.78 | 8.8 | 0 | 0 | 0.2339 |
 | USDC | 1,833 | 5.02 | 8 | 2 | 0 | 0.0087 |
-| ALGO | 1,566 | 4.29 | 7.3 | 2 | 1 | 0.0e+00 |
+| ALGO | 1,566 | 4.29 | 7.3 | 2 | 1 | 1.2e-05 |
 | SNX | 1,274 | 3.49 | 6.5 | 1 | 0 | 0.0013 |
 | COMP | 1,204 | 3.3 | 6.3 | 0 | 0 | 0.0961 |
 | CRV | 1,146 | 3.14 | 6.2 | 4 | 0 | 0.0057 |
 | DOT | 1,142 | 3.13 | 6.2 | 0 | 0 | 0.1401 |
-| UNI | 1,112 | 3.05 | 6.1 | 4 | 3 | 0.0e+00 |
+| UNI | 1,112 | 3.05 | 6.1 | 4 | 3 | 3.8e-14 |
 | AVAX | 1,107 | 3.03 | 6.1 | 0 | 0 | 0.0817 |
 | AAVE | 1,090 | 2.99 | 6 | 0 | 0 | 0.0689 |
 | ICP | 877 | 2.4 | 5.4 | 0 | 0 | 0.1658 |
@@ -292,8 +293,8 @@ is 0.50:
 | ols | 0.5077 | 535 | 0.5029 |
 | feedforward_nn | 0.5032 | 535 | 0.4961 |
 | random_walk_drift | 0.5026 | 545 | 0.4892 |
-| svr_rbf | 0.5025 | 535 | 0.5117 |
 | gru | 0.5025 | 432 | 0.5105 |
+| svr_rbf | 0.5025 | 535 | 0.5117 |
 | svr_poly | 0.502 | 535 | 0.502 |
 | historical_mean | 0.5019 | 545 | 0.5098 |
 | gradient_boosting | 0.5 | 535 | 0.4932 |
@@ -315,8 +316,8 @@ One row per gap, each with its measurement.
 
 | Spec | What is not here | Why |
 |---|---|---|
-| §11.3 | The recurrent model at h=365 | **The GRU is built and runs at four horizons (1, 7, 30, 90).** It refuses h=365, naming its measurement: Task 2 measured the assets, of 24, clearing both >=5 folds and >=30 non-overlapping windows as h=1: 22, h=7: 22, h=30: 22, h=90: 11, h=365: 0, against a threshold of 8 stated in advance. The mart carries 105 refused rows for it across 21 assets, each reading: *gru: h=365 lacks the independent observations a recurrent model needs; only 0 of 24 assets cleared >=5 folds and >=30 non-overlapping windows (measured 2026-10-17 on the 2026-10-14 panel vintage; qualifying horizons: [1, 7, 30, 90])* |
-| §11.2 | Tuned hyperparameters | No inner cross-validation. An honest tuning loop needs a nested walk-forward inside each training fold, and Task 2's measurement shows the folds are not there to spare. Every model runs at the stated config values, so these are scores for *a* parameterisation, not for the best one. |
+| §11.3 | The recurrent model at h=365 | **The GRU is built and runs at four horizons (1, 7, 30, 90).** It refuses h=365, naming its measurement: counting the assets, of 24, that clear both >=5 folds and >=30 non-overlapping windows (measured on the 2026-10-14 panel vintage) gave, at h=1: 22, h=7: 22, h=30: 22, h=90: 11, h=365: 0, against a threshold of 8 stated in advance. The mart carries 105 refused rows for it across 21 assets, each reading: *gru: h=365 lacks the independent observations a recurrent model needs; only 0 of 24 assets cleared >=5 folds and >=30 non-overlapping windows (measured 2026-10-17 on the 2026-10-14 panel vintage; qualifying horizons: [1, 7, 30, 90])* |
+| §11.2 | Tuned hyperparameters | No inner cross-validation. An honest tuning loop needs a nested walk-forward inside each training fold, and the fold counts in §3 show the folds are not there to spare (at h=365, 5.1 to 11.8 independent windows per asset). Every model runs at the stated config values, so these are scores for *a* parameterisation, not for the best one. |
 | §11.4 | ADF/KPSS, cointegration, VECM, GARCH, Markov-switching, DCC | Plan 4b. Needs `arch` plus a hand-rolled DCC estimator; answers a different question and writes a different table. |
 | §11.5 | Factor models, Fama-MacBeth, decile portfolios | Plan 4c, which must first resolve the point-in-time top-N universe §5 and §11.5 both require and no free source serves. That point is **unresolved**. |
 | §11.2 | TRX and SOL | TRX has 365 price rows (364 priced) and SOL 363 (CoinGecko only; Coin Metrics serves neither on the free tier). Both are below the 730-row floor for a five-fold purged split, and both are refused with those counts on every horizon (10 refusal rows). |

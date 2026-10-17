@@ -1119,3 +1119,40 @@ def test_the_score_report_separates_beating_persistence_from_losing_to_it(tmp_pa
     assert sum(r["lost_to_baseline_after_holm"] for r in report.values()) + sum(
         r["beat_baseline_after_holm"] for r in report.values()
     )
+
+
+def test_a_significant_loss_to_persistence_is_not_counted_as_a_win(tmp_path, monkeypatch):
+    """The live run's shape: noise targets, a model that loses to the zero forecast. Counting
+    significance without sign reported 39-65 'beats' per model when every one was a loss."""
+    days = 2000
+    rng = np.random.default_rng(7)
+    dates = pd.date_range("2019-01-01", periods=days, freq="D")
+    price = 100.0 * np.exp(np.cumsum(rng.normal(0.0, 0.02, days)))
+    vintage = pd.Timestamp("2026-10-12 08:30", tz="UTC")
+    panel = pd.DataFrame(
+        {"symbol": "BTC", "metric_date": dates, "price_usd": price, "panel_vintage_ts": vintage}
+    )
+    estimates = pd.DataFrame(
+        {
+            "symbol": "BTC",
+            "metric_date": dates,
+            "method_id": "metcalfe_estimated",
+            "fair_value": price * np.exp(rng.normal(0.0, 1.0, days)),
+            "applicable": True,
+        }
+    )
+    settings = Settings(data_root=str(tmp_path))
+    monkeypatch.setattr(cli, "_read_score_inputs", lambda _settings: (panel, estimates))
+    report = cli.run_score(settings, [], ["naive_persistence", "feedforward_nn"], [1])
+
+    written = pd.read_parquet(
+        pathlib.Path(settings.resolver.table("gold", "model_score")) / "part-0.parquet"
+    )
+    rows = written[written["model_id"] == "feedforward_nn"]
+    holm = rows[rows["metric"] == "dm_p_value_holm"]["value"].to_numpy()
+    stat = rows[rows["metric"] == "dm_statistic"]["value"].to_numpy()
+    assert ((holm < 0.05) & (stat > 0)).sum() >= 1  # not vacuous: a real significant loss
+    assert report["feedforward_nn"]["beat_baseline_after_holm"] == 0
+    assert report["feedforward_nn"]["lost_to_baseline_after_holm"] == int(
+        ((holm < 0.05) & (stat > 0)).sum()
+    )
