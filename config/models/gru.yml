@@ -6,8 +6,10 @@ params:
   epochs: 30
   learning_rate: 0.01
   random_state: 20261017
-  # Task 2's measurement (2026-10-17 vintage): assets, of 24, clearing >=5 folds AND >=30
+  # Task 2's measurement, taken on 2026-10-17 against the 2026-10-14 panel vintage: assets, of 24, clearing >=5 folds AND >=30
   # non-overlapping windows at each horizon. A horizon qualifies at 8 or more, stated in advance.
   qualifying_horizons: [1, 7, 30, 90]
+  measured_on: "2026-10-17"
+  panel_vintage: "2026-10-14"
   assets_clearing: {1: 22, 7: 22, 30: 22, 90: 11, 365: 0}
 citation: "Spec 11.3, a gated recurrent unit; refuses horizons without the independent windows it needs"

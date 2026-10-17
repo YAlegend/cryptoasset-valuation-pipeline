@@ -7,6 +7,14 @@ and are dropped from training. At predict time the first L-1 test rows have no h
 the features are already lagged a day when the runner sees them. Zero padding would
 fabricate history, and dropping rows would break ``len(predict(X)) == len(X)``.
 
+THAT HISTORY IS NOT ADJACENT TO THE TEST BLOCK. The stored rows are the last L-1 rows the model
+was allowed to TRAIN on, and the runner's purge ends the training slice h + embargo rows before
+the test block (those rows' labels overlap it). So a purge gap of h + embargo days sits between
+the history and the first test row, which touches only the first L-1 rows of each test block
+(under 4% at h=30) and only their feature history, not their target. The rows inside the gap
+would give a continuous history and leak nothing, but fetching them means widening the Model
+protocol and the runner for one model of eleven, so the gap is accepted rather than closed.
+
 REFUSES THE HORIZONS THAT LACK INDEPENDENT OBSERVATIONS. Only ``qualifying_horizons`` are
 fitted; the rest raise Unfittable carrying Task 2's measured asset count, which the runner
 records as a ``refused`` row, a research finding rather than a defect.
@@ -68,7 +76,8 @@ class GRUModel:
             raise Unfittable(
                 f"{self.spec.model_id}: h={horizon} lacks the independent observations a "
                 f"recurrent model needs; only {p['assets_clearing'].get(horizon, 'no')} of 24 "
-                f"assets clear >=5 folds and >=30 non-overlapping windows (qualifying "
+                f"assets cleared >=5 folds and >=30 non-overlapping windows (measured "
+                f"{p['measured_on']} on the {p['panel_vintage']} panel vintage; qualifying "
                 f"horizons: {p['qualifying_horizons']})"
             )
         length = p["sequence_length"]
