@@ -35,6 +35,12 @@ def test_mase_below_one_means_it_beat_predicting_zero():
     assert mase(y, np.zeros_like(y), scale) == pytest.approx(1.0)
 
 
+def test_naive_scale_is_mean_abs_not_demeaned_when_the_fold_has_drift():
+    """The scale is the error of forecasting zero, mean|y|, not the spread around the mean."""
+    assert naive_scale(np.array([0.01, 0.03])) == pytest.approx(0.02)
+    assert naive_scale(np.array([0.03, 0.03, -0.01])) == pytest.approx(7 / 300)
+
+
 def test_mase_refuses_a_zero_naive_denominator():
     """Review Focus 4: USDC is a dollar peg; a flat training fold makes the scale 0."""
     assert naive_scale(np.zeros(100)) is None
@@ -54,15 +60,26 @@ def test_directional_accuracy_reports_its_usable_count_and_refuses_an_all_zero_b
     assert accuracy == pytest.approx(0.5)
 
 
+def test_a_zero_prediction_is_a_wrong_direction_not_a_correct_one():
+    """The naive baseline predicts exactly 0.0 for every row. A zero must not count as a hit."""
+    y = np.array([0.01, -0.01])
+    accuracy, usable = directional_accuracy(y, np.array([0.0, 0.0]))
+    assert accuracy == pytest.approx(0.0)
+    assert usable == 2
+
+
 def test_every_metric_ignores_nan_pairs_rather_than_propagating_them():
     y = np.array([0.01, np.nan, -0.01])
     yhat = np.array([0.01, 0.5, np.nan])
     out = score_all(y, yhat, naive_scale=0.01)
     assert out["n"] == 1
     assert out["mae"] == pytest.approx(0.0)
+    assert out["directional_accuracy"] == pytest.approx(1.0)
+    assert out["usable_direction_rows"] == 1.0
 
 
 def test_score_all_returns_none_for_every_metric_on_an_empty_overlap():
     out = score_all(np.array([np.nan, np.nan]), np.array([1.0, 2.0]), naive_scale=0.01)
+    assert set(out) == {"mae", "rmse", "mase", "directional_accuracy", "usable_direction_rows", "n"}
     assert out["n"] == 0
     assert out["mae"] is None and out["rmse"] is None and out["mase"] is None

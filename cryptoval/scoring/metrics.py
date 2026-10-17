@@ -6,9 +6,10 @@ particular return a confident, wrong answer if left alone, and both are live on 
 universe:
 
 * MASE divides by the naive forecast's in-sample error. USDC is a dollar peg whose daily
-  log returns are ~1e-6 and can be exactly zero across a flat fold, so the denominator
-  goes to zero and MASE comes back as inf or NaN -- which sorts to the top of a league
-  table as either the best or the worst model depending on the sort.
+  log returns average about 2.9e-4 in absolute value (measured 2.854e-04), and can be
+  exactly zero across a flat fold, so the denominator goes to zero and MASE comes back as
+  inf or NaN -- which sorts to the top of a league table as either the best or the worst
+  model depending on the sort.
 * Directional accuracy on a test block whose returns are all one sign is whatever the
   model's constant prediction happens to be: 1.0 or 0.0, neither of them skill. Rows with
   a zero return have no direction to predict and are excluded, and the count that
