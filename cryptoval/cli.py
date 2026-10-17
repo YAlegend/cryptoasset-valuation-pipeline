@@ -598,12 +598,17 @@ def run_score(
 
     report: dict[str, dict] = {}
     for model_id, group in scores[scores["model_id"] != "*"].groupby("model_id"):
-        beaten = group[(group["metric"] == "dm_p_value_holm") & (group["value"] < 0.05)]
+        # Direction matters: a DM statistic > 0 means the model's loss was HIGHER than
+        # persistence's, so a significant positive value is persistence winning.
+        holm = group[(group["metric"] == "dm_p_value_holm") & (group["value"] < 0.05)]
+        stat = group[group["metric"] == "dm_statistic"].set_index(["symbol", "horizon"])["value"]
+        signs = stat.reindex(pd.MultiIndex.from_frame(holm[["symbol", "horizon"]])).to_numpy()
         report[str(model_id)] = {
             "rows": int(len(group)),
             "refusals": int((group["metric"] == "refused").sum()),
             "symbols": int(group["symbol"].nunique()),
-            "beat_baseline_after_holm": int(len(beaten)),
+            "beat_baseline_after_holm": int((signs < 0).sum()),
+            "lost_to_baseline_after_holm": int((signs > 0).sum()),
         }
     return report
 

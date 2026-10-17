@@ -118,6 +118,14 @@ def build_frame(panel: pd.DataFrame, estimates: pd.DataFrame, horizon: int) -> p
         lambda s: np.log(s.where(s > 0.0) / s.where(s > 0.0).shift(1))
     )
 
+    # The panel spine is the union of both vendors' symbol-days, so an asset can carry years of
+    # rows before its first price (TRX: 3,294 rows, 364 priced). Folding on those rows would
+    # size every fold, and the non-overlapping sample size, by days that have no target at all.
+    first_priced = (
+        out["metric_date"].where(out["price_usd"].notna()).groupby(out["symbol"]).transform("min")
+    )
+    out = out[first_priced.isna() | (out["metric_date"] >= first_priced)]
+
     dropped: dict[str, str] = {}
     # Full-sample variance is harmless: the 1e-12 floor drops only signals constant on every row.
     for method_id in methods:

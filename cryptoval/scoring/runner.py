@@ -101,7 +101,9 @@ def run_walk_forward(
             continue
 
         # Pooled out-of-sample errors per model, for the DM test at fold -1.
-        pooled: dict[str, list[np.ndarray]] = {model_id: [] for model_id in models}
+        # Keyed by fold: a model that refused one fold must be paired with persistence on the
+        # folds it DID score, or the two error vectors are misaligned (and differ in length).
+        pooled: dict[str, dict[int, np.ndarray]] = {model_id: {} for model_id in models}
 
         for fold in folds:
             train = group.iloc[fold.train].copy()
@@ -163,7 +165,7 @@ def run_walk_forward(
                     continue
 
                 scored = score_all(y_test, predicted, scale)
-                pooled[model_id].append(y_test - predicted)
+                pooled[model_id][fold.index] = y_test - predicted
                 for metric, value in scored.items():
                     if metric == "n":
                         continue
@@ -182,15 +184,16 @@ def run_walk_forward(
                         )
                     )
 
-        baseline_errors = (
-            np.concatenate(pooled[BASELINE_MODEL_ID])
-            if pooled.get(BASELINE_MODEL_ID)
-            else np.array([])
-        )
-        for model_id, chunks in pooled.items():
-            if model_id == BASELINE_MODEL_ID or not chunks or baseline_errors.size == 0:
+        baseline_by_fold = pooled.get(BASELINE_MODEL_ID, {})
+        for model_id, by_fold in pooled.items():
+            shared = sorted(set(by_fold) & set(baseline_by_fold))
+            if model_id == BASELINE_MODEL_ID or not shared:
                 continue
-            result = diebold_mariano(np.concatenate(chunks), baseline_errors, horizon)
+            result = diebold_mariano(
+                np.concatenate([by_fold[i] for i in shared]),
+                np.concatenate([baseline_by_fold[i] for i in shared]),
+                horizon,
+            )
             for metric, value in (
                 ("dm_statistic", result.statistic),
                 ("dm_p_value", result.p_value),

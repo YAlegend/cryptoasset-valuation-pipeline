@@ -205,3 +205,29 @@ def test_random_walk_drift_gets_a_nonzero_drift_from_the_built_frame():
     rmse = scored.groupby("model_id")["value"].mean()
     assert rmse["naive_persistence"] == pytest.approx(0.03)
     assert rmse["random_walk_drift"] == pytest.approx(0.0, abs=1e-9)
+
+
+class _RefusesOnTheFirstFold:
+    """Refuses while the training slice is short (fold 0 only), then predicts a constant."""
+
+    spec = ModelSpec(model_id="late_starter", family="linear")
+
+    def fit(self, X, y, context):
+        from cryptoval.scoring.base import Unfittable
+
+        if len(y) < 600:
+            raise Unfittable("late_starter: short training slice")
+
+    def predict(self, X):
+        return np.full(len(X), 0.001)
+
+
+def test_a_model_that_refused_one_fold_is_paired_with_persistence_on_the_folds_it_scored():
+    """The live run crashed (2409 vs 3011 errors) when the DM vectors were pooled unaligned."""
+    models = {**_baselines(), "late_starter": _RefusesOnTheFirstFold()}
+    rows = run_walk_forward(_frame(), models, horizon=30)
+    mine = rows[rows["model_id"] == "late_starter"]
+    assert set(mine[mine["metric"] == "refused"]["fold"]) == {0}  # it really did skip a fold
+    dm = mine[mine["metric"] == "dm_p_value"]
+    assert len(dm) == 1
+    assert dm["n_test_rows"].iloc[0] == mine[mine["metric"] == "rmse"]["n_test_rows"].sum()

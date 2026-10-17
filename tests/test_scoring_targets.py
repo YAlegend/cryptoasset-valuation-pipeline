@@ -166,3 +166,12 @@ def test_the_daily_log_return_restarts_at_each_symbols_first_row():
     estimates = _estimates(panel, "mayer_multiple", np.linspace(1.2, 1.8, len(panel)))
     frame = build_frame(panel, estimates, horizon=7)
     assert frame.groupby("symbol")["daily_log_return"].head(1).isna().all()
+
+
+def test_rows_before_a_symbols_first_price_are_not_part_of_its_frame():
+    """TRX has 3,294 panel rows and 364 priced ones; folds must be sized by the priced ones."""
+    price = _price_frame(400)
+    price.loc[:99, "price_usd"] = np.nan  # a 100-day price-less lead-in, as the spine produces
+    frame = build_frame(price, _estimates(_price_frame(400), "m", 1.1), horizon=1)
+    assert len(frame) == 300
+    assert frame["metric_date"].min() == price["metric_date"].iloc[100]

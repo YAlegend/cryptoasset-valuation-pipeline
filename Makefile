@@ -50,4 +50,13 @@ dbt:
 	# full-refresh: a seed CSV that gained a column fails to load otherwise
 	cd dbt && ../.venv/bin/dbt seed --full-refresh --profiles-dir . && ../.venv/bin/dbt build --profiles-dir .
 
-all: lint test ingest dbt estimate dbt validate
+# A recipe, not a prerequisite list: make runs a repeated prerequisite once, so
+# `all: ... dbt estimate dbt ...` skipped the second dbt and the marts never saw the gold tables.
+all:
+	$(MAKE) lint test ingest
+	$(MAKE) dbt
+	$(MAKE) estimate
+	$(MAKE) dbt
+	$(MAKE) score
+	$(MAKE) dbt
+	$(MAKE) validate

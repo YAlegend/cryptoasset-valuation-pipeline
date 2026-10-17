@@ -1096,3 +1096,26 @@ def test_a_rerun_replaces_the_short_history_rows_rather_than_duplicating_them(
     keys = ["model_id", "symbol", "horizon", "fold", "metric"]
     assert not out.duplicated(subset=keys).any()
     assert (out["model_id"] == "*").sum() == (first["model_id"] == "*").sum()
+
+
+def test_the_score_report_separates_beating_persistence_from_losing_to_it(tmp_path, monkeypatch):
+    """A significant DM statistic is not a win: positive means persistence had the lower loss."""
+    settings = Settings(data_root=str(tmp_path))
+    monkeypatch.setattr(cli, "_read_score_inputs", lambda _settings: _score_inputs())
+    report = cli.run_score(settings, [], ["naive_persistence", "historical_mean", "ols"], [30])
+
+    written = pd.read_parquet(
+        pathlib.Path(settings.resolver.table("gold", "model_score")) / "part-0.parquet"
+    )
+    for model_id in ("historical_mean", "ols"):
+        rows = written[written["model_id"] == model_id]
+        holm = rows[rows["metric"] == "dm_p_value_holm"]["value"].to_numpy()
+        stat = rows[rows["metric"] == "dm_statistic"]["value"].to_numpy()
+        outcome = report[model_id]
+        assert outcome["beat_baseline_after_holm"] == int(((holm < 0.05) & (stat < 0)).sum())
+        assert outcome["lost_to_baseline_after_holm"] == int(((holm < 0.05) & (stat > 0)).sum())
+    assert report["naive_persistence"]["beat_baseline_after_holm"] == 0
+    # Not vacuous: the drifting fixture gives at least one significant verdict to classify.
+    assert sum(r["lost_to_baseline_after_holm"] for r in report.values()) + sum(
+        r["beat_baseline_after_holm"] for r in report.values()
+    )
