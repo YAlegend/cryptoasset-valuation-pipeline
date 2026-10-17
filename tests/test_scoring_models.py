@@ -234,7 +234,11 @@ def test_the_gru_recovers_a_learnable_signal_at_a_qualifying_horizon(horizon):
     predicted = model.predict(X[450:])
     assert np.isfinite(predicted).all()
     assert len(predicted) == 150
-    assert np.std(predicted) / np.std(y[450:]) > 0.5
+    assert np.std(predicted) / np.std(y[450:]) > 0.5  # catches a flat prediction
+    # Catches the wrong scale: a standardised, un-unscaled output is ~30x too wide and passes
+    # the spread bar above. Measured MAE ratio to predicting zero: 0.22.
+    mae = np.mean(np.abs(y[450:] - predicted))
+    assert mae < 0.5 * np.mean(np.abs(y[450:]))
 
 
 def test_the_gru_refuses_a_horizon_without_the_independent_windows_it_needs():
@@ -296,3 +300,44 @@ def test_the_gru_early_test_rows_see_the_training_tail_not_zeros():
     with torch.no_grad():
         raw = model._net(torch.tensor(window[None], dtype=torch.float32)).item()
     assert model.predict(X[450:])[0] == pytest.approx(raw * model._y_std + model._y_mean)
+
+
+def test_the_gru_pairs_each_window_with_the_target_of_its_last_row(monkeypatch):
+    # White-box on purpose: windows overlap, so a target shifted one row is still learnable
+    # from inside its window and no output-based bar can see it. Capture what training feeds
+    # the net: window k must be scaled X[k : k+L] paired with scaled y[k+L-1].
+    import dataclasses
+
+    from cryptoval.scoring import recurrent
+
+    seen = {}
+
+    class SpyNet(recurrent._Net):
+        def forward(self, x):
+            seen.setdefault("windows", x.detach().clone())
+            return super().forward(x)
+
+    real_mse = recurrent.nn.functional.mse_loss
+
+    def spy_mse(pred, target):
+        seen.setdefault("target", target.detach().clone())
+        return real_mse(pred, target)
+
+    monkeypatch.setattr(recurrent, "_Net", SpyNet)
+    monkeypatch.setattr(recurrent.nn.functional, "mse_loss", spy_mse)
+
+    length, n = 3, 8
+    X = np.column_stack([np.arange(n) ** 2.0, np.arange(n) * 10.0 + 1])  # (8, 2), all distinct
+    y = np.array([0.5, -1.0, 2.0, 0.25, -0.75, 1.5, 3.0, -2.0])
+    spec = dataclasses.replace(
+        MODELS["gru"].spec, params={**MODELS["gru"].spec.params, "sequence_length": length}
+    )
+    recurrent.GRUModel(spec).fit(X, y, _gru_context(n))
+
+    windows, target = seen["windows"].numpy(), seen["target"].numpy()
+    scaled_X = (X - X.mean(axis=0)) / X.std(axis=0)
+    scaled_y = (y - y.mean()) / y.std()
+    assert len(windows) == len(target) == n - length + 1
+    for k in range(n - length + 1):
+        np.testing.assert_allclose(windows[k], scaled_X[k : k + length], rtol=1e-5, atol=1e-6)
+        assert target[k] == pytest.approx(scaled_y[k + length - 1], abs=1e-6)

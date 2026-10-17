@@ -73,10 +73,12 @@ class GRUModel:
         p = self.spec.params
         horizon = context["horizon"]
         if horizon not in p["qualifying_horizons"]:
+            count = p["assets_clearing"].get(horizon)
+            cleared = "no count was measured for" if count is None else f"only {count} of 24"
             raise Unfittable(
                 f"{self.spec.model_id}: h={horizon} lacks the independent observations a "
-                f"recurrent model needs; only {p['assets_clearing'].get(horizon, 'no')} of 24 "
-                f"assets cleared >=5 folds and >=30 non-overlapping windows (measured "
+                f"recurrent model needs; {cleared} assets cleared >=5 folds and >=30 "
+                f"non-overlapping windows (measured "
                 f"{p['measured_on']} on the {p['panel_vintage']} panel vintage; qualifying "
                 f"horizons: {p['qualifying_horizons']})"
             )
