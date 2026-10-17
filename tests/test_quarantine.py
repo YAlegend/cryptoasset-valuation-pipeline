@@ -19,9 +19,7 @@ def _frame() -> pd.DataFrame:
     return pd.DataFrame(
         {
             "asset": ["usdc", "usdc", "btc"],
-            "metric_date": pd.to_datetime(
-                ["2026-05-05", "2026-05-06", "2026-05-05"], utc=True
-            ),
+            "metric_date": pd.to_datetime(["2026-05-05", "2026-05-06", "2026-05-05"], utc=True),
             "volume_usd": [8.02e52, 3.4e9, 2.9e9],
             "market_cap_usd": [7.52e10, 7.5e10, 1.6e12],
         }

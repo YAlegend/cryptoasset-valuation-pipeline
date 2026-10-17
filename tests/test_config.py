@@ -14,7 +14,7 @@ def test_loads_full_universe():
     _, assets = load_config("config")
     crypto = [a for a in assets if not a.is_equity]
     equities = [a for a in assets if a.is_equity]
-    assert len(crypto) == 24      # 23 valuation targets plus SOL, which has no CM id
+    assert len(crypto) == 24  # 23 valuation targets plus SOL, which has no CM id
     # five single-name equities plus gold and the dollar index (spec 15 Q1, resolved)
     assert len(equities) == 7
 

@@ -37,9 +37,7 @@ def test_the_hand_written_sections_live_in_config_so_regeneration_cannot_destroy
     extras = load_card_extras()
     specs = load_method_specs()
     assert set(extras) == set(specs)
-    missing = [
-        m for m in specs if not (extras[m]["failure_modes"] and extras[m]["assumptions"])
-    ]
+    missing = [m for m in specs if not (extras[m]["failure_modes"] and extras[m]["assumptions"])]
     assert not missing, f"method(s) with no hand-written card sections: {missing}"
     cards = write_cards(specs, str(tmp_path), extras)
     assert not any("(to be written)" in open(p, encoding="utf-8").read() for p in cards)

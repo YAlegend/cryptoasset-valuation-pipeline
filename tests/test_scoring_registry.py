@@ -84,9 +84,7 @@ def test_two_configs_with_the_same_model_id_are_refused(tmp_path):
 
 def test_a_duplicate_model_id_is_refused():
     class Duplicate:
-        spec = ModelSpec(
-            model_id="naive_persistence", family="baseline", params={}, citation="x"
-        )
+        spec = ModelSpec(model_id="naive_persistence", family="baseline", params={}, citation="x")
 
         def fit(self, X, y, context):
             return None

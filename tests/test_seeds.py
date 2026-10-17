@@ -20,8 +20,14 @@ def test_the_asset_seed_carries_one_row_per_symbol(tmp_path):
 
 def test_the_metric_source_seed_is_long_not_wide(tmp_path):
     assets = [
-        Asset(symbol="AVAX", sector="smart_contract_l1", consensus="pos", cm_id="avaxc",
-              gecko_id="avalanche-2", metric_sources={"volume": "cm:avax"}),
+        Asset(
+            symbol="AVAX",
+            sector="smart_contract_l1",
+            consensus="pos",
+            cm_id="avaxc",
+            gecko_id="avalanche-2",
+            metric_sources={"volume": "cm:avax"},
+        ),
     ]
     rows = _rows(write_asset_seeds(assets, str(tmp_path))[1])
     # One row per (symbol, group), so a vendor id serving two groups appears twice and the
@@ -36,8 +42,14 @@ def test_the_metric_source_seed_is_long_not_wide(tmp_path):
 
 def test_a_coingecko_valuation_source_is_recorded_as_such(tmp_path):
     assets = [
-        Asset(symbol="TRX", sector="smart_contract_l1", consensus="pos", cm_id="trx",
-              gecko_id="tron", metric_sources={"valuation": "coingecko"}),
+        Asset(
+            symbol="TRX",
+            sector="smart_contract_l1",
+            consensus="pos",
+            cm_id="trx",
+            gecko_id="tron",
+            metric_sources={"valuation": "coingecko"},
+        ),
     ]
     rows = {r["metric_group"]: r for r in _rows(write_asset_seeds(assets, str(tmp_path))[1])}
     assert rows["valuation"]["source_kind"] == "coingecko"
@@ -48,8 +60,14 @@ def test_a_coingecko_valuation_source_is_recorded_as_such(tmp_path):
 
 def test_slugs_are_serialised_as_a_pipe_delimited_field(tmp_path):
     assets = [
-        Asset(symbol="UNI", sector="defi", consensus="other", cm_id="uni", gecko_id="uniswap",
-              defillama_slugs=("Uniswap V4", "Uniswap V3")),
+        Asset(
+            symbol="UNI",
+            sector="defi",
+            consensus="other",
+            cm_id="uni",
+            gecko_id="uniswap",
+            defillama_slugs=("Uniswap V4", "Uniswap V3"),
+        ),
     ]
     row = _rows(write_asset_seeds(assets, str(tmp_path))[0])[0]
     # Pipe, not comma: these are CSV files and the slugs contain spaces but never pipes.
@@ -57,8 +75,9 @@ def test_slugs_are_serialised_as_a_pipe_delimited_field(tmp_path):
 
 
 def test_a_network_source_of_none_is_omitted_rather_than_written_as_a_join_key(tmp_path):
-    sol = Asset(symbol="SOL", sector="smart_contract_l1", consensus="pos", cm_id=None,
-                gecko_id="solana")
+    sol = Asset(
+        symbol="SOL", sector="smart_contract_l1", consensus="pos", cm_id=None, gecko_id="solana"
+    )
     rows = _rows(write_asset_seeds([sol], str(tmp_path))[1])
     # SOL has no network source at all. A row with source_id "none" would join to nothing
     # and read as a configuration error later; absence is the honest encoding.
@@ -67,10 +86,14 @@ def test_a_network_source_of_none_is_omitted_rather_than_written_as_a_join_key(t
 
 def test_the_seeds_are_deterministic(tmp_path):
     _, assets = load_config()
-    first = [pathlib.Path(p).read_text(encoding="utf-8")
-             for p in write_asset_seeds(assets, str(tmp_path / "a"))]
-    second = [pathlib.Path(p).read_text(encoding="utf-8")
-              for p in write_asset_seeds(assets, str(tmp_path / "b"))]
+    first = [
+        pathlib.Path(p).read_text(encoding="utf-8")
+        for p in write_asset_seeds(assets, str(tmp_path / "a"))
+    ]
+    second = [
+        pathlib.Path(p).read_text(encoding="utf-8")
+        for p in write_asset_seeds(assets, str(tmp_path / "b"))
+    ]
     # Committed generated files must not churn, or every run dirties the tree.
     assert first == second
 
@@ -124,8 +147,13 @@ def test_genesis_date_reaches_the_asset_seed_and_is_blank_when_unknown(tmp_path)
     import datetime as dt
 
     assets = [
-        Asset(symbol="BTC", sector="pow_monetary", consensus="pow", cm_id="btc",
-              genesis_date=dt.date(2009, 1, 3)),
+        Asset(
+            symbol="BTC",
+            sector="pow_monetary",
+            consensus="pow",
+            cm_id="btc",
+            genesis_date=dt.date(2009, 1, 3),
+        ),
         Asset(symbol="BNB", sector="exchange", consensus="other", cm_id="bnb"),
     ]
     rows = {r["symbol"]: r for r in _rows(write_asset_seeds(assets, str(tmp_path))[0])}

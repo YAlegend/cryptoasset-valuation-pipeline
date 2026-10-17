@@ -85,9 +85,7 @@ def test_volume_anomaly_flags_a_tenfold_jump():
     c = load_contract(CONTRACT)
     steady = pd.DataFrame(
         {
-            "metric_date": pd.to_datetime(
-                [f"2026-09-{d:02d}" for d in range(1, 21)], utc=True
-            ),
+            "metric_date": pd.to_datetime([f"2026-09-{d:02d}" for d in range(1, 21)], utc=True),
             "value": [100.0] * 19 + [1000.0],
         }
     )
@@ -100,9 +98,7 @@ def test_volume_anomaly_allows_normal_variation():
     c = load_contract(CONTRACT)
     steady = pd.DataFrame(
         {
-            "metric_date": pd.to_datetime(
-                [f"2026-09-{d:02d}" for d in range(1, 21)], utc=True
-            ),
+            "metric_date": pd.to_datetime([f"2026-09-{d:02d}" for d in range(1, 21)], utc=True),
             "value": [100.0, 105.0, 98.0] * 6 + [102.0, 99.0],
         }
     )
@@ -166,9 +162,7 @@ def test_volume_anomaly_zero_trailing_mean_passes_with_reason():
     c = load_contract(CONTRACT)
     zeros = pd.DataFrame(
         {
-            "metric_date": pd.to_datetime(
-                [f"2026-09-{d:02d}" for d in range(1, 21)], utc=True
-            ),
+            "metric_date": pd.to_datetime([f"2026-09-{d:02d}" for d in range(1, 21)], utc=True),
             "value": [0.0] * 20,
         }
     )
@@ -301,9 +295,7 @@ def test_the_volume_baseline_is_a_trailing_window_not_all_of_history():
     Coin Metrics asset-days were flagged by the expanding baseline."""
     c = load_contract(CONTRACT)
     steady_growth = _growing(200, 0.01)
-    result = check_volume_anomaly(
-        steady_growth, c, "volume_reported_spot_usd_1d", "metric_date"
-    )
+    result = check_volume_anomaly(steady_growth, c, "volume_reported_spot_usd_1d", "metric_date")
     assert result.passed, result.detail
 
 

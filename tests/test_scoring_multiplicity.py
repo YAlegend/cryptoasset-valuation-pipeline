@@ -16,8 +16,13 @@ def _p_rows(p_values, model_ids=None, symbols=None, horizons=None) -> pd.DataFra
     for p, model_id, symbol, horizon in zip(p_values, model_ids, symbols, horizons, strict=True):
         row = dict.fromkeys(SCORE_COLUMNS)
         row.update(
-            model_id=model_id, symbol=symbol, horizon=horizon, fold=-1,
-            metric="dm_p_value", value=p, reason="",
+            model_id=model_id,
+            symbol=symbol,
+            horizon=horizon,
+            fold=-1,
+            metric="dm_p_value",
+            value=p,
+            reason="",
         )
         rows.append(row)
     return pd.DataFrame(rows, columns=SCORE_COLUMNS)

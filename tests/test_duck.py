@@ -106,8 +106,14 @@ def test_connect_rejects_remote_root_without_side_effects(tmp_path, monkeypatch,
 
 
 _PANEL_METRIC_COLUMNS = (
-    "CapMVRVCur", "realized_cap", "PriceUSD", "SplyCur", "HashRate", "IssTotUSD",
-    "FeeTotNtv", "TxCnt",
+    "CapMVRVCur",
+    "realized_cap",
+    "PriceUSD",
+    "SplyCur",
+    "HashRate",
+    "IssTotUSD",
+    "FeeTotNtv",
+    "TxCnt",
 )
 
 
@@ -278,9 +284,7 @@ def test_fct_asset_metrics_daily_sql_keeps_volumes_apart_and_records_the_market_
         ) as t(symbol, metric_date, cg_price_usd, cg_market_cap_usd, cg_volume_total_usd)
         """
     )
-    con.execute(
-        "alter table stg_market_chart add column cg_effective_start_ts timestamptz"
-    )
+    con.execute("alter table stg_market_chart add column cg_effective_start_ts timestamptz")
     con.execute(
         """
         create table asset_metric_sources as select * from (values
@@ -304,7 +308,13 @@ def test_fct_asset_metrics_daily_sql_keeps_volumes_apart_and_records_the_market_
     }
     # Both volumes side by side, each with its own velocity over the same market cap.
     assert rows[("BTC", "2026-10-10")] == (
-        1.0e12, "coinmetrics", 5.0e9, 1.5e10, 5.0e-3, 1.5e-2, True
+        1.0e12,
+        "coinmetrics",
+        5.0e9,
+        1.5e10,
+        5.0e-3,
+        1.5e-2,
+        True,
     )
     # A zero market cap leaves both velocities NULL.
     assert rows[("BTC", "2026-10-11")][4:6] == (None, None)
@@ -366,8 +376,18 @@ def test_a_coingecko_only_symbol_day_gets_a_row_with_its_own_provenance():
     ).fetchall()
     assert rows == [
         (
-            "SOL", datetime.date(2026, 10, 10), 8.0e10, "coingecko", 150.0,
-            None, 4.0e9, None, 4.0e9 / 8.0e10,
-            None, None, None, datetime.datetime(2026, 10, 11),
+            "SOL",
+            datetime.date(2026, 10, 10),
+            8.0e10,
+            "coingecko",
+            150.0,
+            None,
+            4.0e9,
+            None,
+            4.0e9 / 8.0e10,
+            None,
+            None,
+            None,
+            datetime.datetime(2026, 10, 11),
         )
     ]

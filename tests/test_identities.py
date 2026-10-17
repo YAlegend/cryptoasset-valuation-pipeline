@@ -22,9 +22,7 @@ def test_mvrv_identity_holds_for_consistent_rows():
 
 
 def test_mvrv_identity_fails_when_realized_cap_is_inconsistent():
-    df = pd.DataFrame(
-        {"CapMrktCurUSD": [1.0e12], "CapMVRVCur": [2.0], "realized_cap": [9.9e11]}
-    )
+    df = pd.DataFrame({"CapMrktCurUSD": [1.0e12], "CapMVRVCur": [2.0], "realized_cap": [9.9e11]})
     res = check_mvrv_identity(df)
     assert not res.passed
     assert "realized_cap" in res.detail
@@ -42,11 +40,9 @@ def test_mvrv_identity_ignores_null_rows_rather_than_failing():
 
 
 def test_supply_identity_holds_and_fails():
-    good = pd.DataFrame({"SplyCur": [19_000_000.0], "PriceUSD": [100.0],
-                         "CapMrktCurUSD": [1.9e9]})
+    good = pd.DataFrame({"SplyCur": [19_000_000.0], "PriceUSD": [100.0], "CapMrktCurUSD": [1.9e9]})
     assert check_supply_identity(good).passed
-    bad = pd.DataFrame({"SplyCur": [19_000_000.0], "PriceUSD": [100.0],
-                        "CapMrktCurUSD": [1.0e9]})
+    bad = pd.DataFrame({"SplyCur": [19_000_000.0], "PriceUSD": [100.0], "CapMrktCurUSD": [1.0e9]})
     assert not check_supply_identity(bad).passed
 
 
@@ -108,9 +104,7 @@ def test_mvrv_identity_reports_non_positive_mvrv():
 
 
 def test_mvrv_identity_null_mvrv_is_not_non_positive():
-    df = pd.DataFrame(
-        {"CapMrktCurUSD": [1.0e12], "CapMVRVCur": [np.nan], "realized_cap": [np.nan]}
-    )
+    df = pd.DataFrame({"CapMrktCurUSD": [1.0e12], "CapMVRVCur": [np.nan], "realized_cap": [np.nan]})
     assert check_mvrv_identity(df).passed
 
 

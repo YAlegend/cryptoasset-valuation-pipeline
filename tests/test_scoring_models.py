@@ -210,6 +210,7 @@ def test_the_mlp_does_not_carve_a_random_validation_split_out_of_its_training_da
 
 # --- the GRU (Task 9, Outcome A: h in 1, 7, 30, 90 qualify; h=365 clears for no asset) ---------
 
+
 def _gru_context(n, horizon=1):
     return {"horizon": horizon, "daily_log_return": np.zeros(n)}
 
@@ -243,8 +244,11 @@ def test_the_gru_recovers_a_learnable_signal_at_a_qualifying_horizon(horizon):
 
 def test_the_gru_refuses_a_horizon_without_the_independent_windows_it_needs():
     X, y = _learnable(n=600)
-    with pytest.raises(Unfittable, match=r"h=365.*0 of 24 assets cleared.*non-overlapping.*"
-        r"measured 2026-10-17 on the 2026-10-14 panel vintage"):
+    with pytest.raises(
+        Unfittable,
+        match=r"h=365.*0 of 24 assets cleared.*non-overlapping.*"
+        r"measured 2026-10-17 on the 2026-10-14 panel vintage",
+    ):
         _fresh_gru().fit(X[:450], y[:450], _gru_context(450, 365))
 
 

@@ -242,13 +242,28 @@ def test_fetch_requests_every_configured_vendor_id():
 
     def handler(request: httpx.Request) -> httpx.Response:
         captured.update(dict(request.url.params))
-        return httpx.Response(200, json={"data": [
-            {"asset": "avaxc", "time": "2026-10-01T00:00:00.000000000Z", "PriceUSD": "30.0"},
-        ]})
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "asset": "avaxc",
+                        "time": "2026-10-01T00:00:00.000000000Z",
+                        "PriceUSD": "30.0",
+                    },
+                ]
+            },
+        )
 
     assets = [
-        Asset(symbol="AVAX", sector="smart_contract_l1", consensus="pos", cm_id="avaxc",
-              gecko_id="avalanche-2", metric_sources={"volume": "cm:avax"}),
+        Asset(
+            symbol="AVAX",
+            sector="smart_contract_l1",
+            consensus="pos",
+            cm_id="avaxc",
+            gecko_id="avalanche-2",
+            metric_sources={"volume": "cm:avax"},
+        ),
         Asset(symbol="BTC", sector="pow_monetary", consensus="pow", cm_id="btc"),
     ]
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
@@ -259,14 +274,18 @@ def test_fetch_requests_every_configured_vendor_id():
 
 
 def test_status_sidecar_columns_are_dropped():
-    payload = {"data": [{
-        "asset": "btc",
-        "time": "2026-10-01T00:00:00.000000000Z",
-        "FlowInExUSD": "1000.0",
-        "FlowInExUSD-status": "unavailable",
-        "FlowInExUSD-status-time": "2026-10-01T00:00:00.000000000Z",
-        "FlowOutExUSD-status": "unavailable",
-    }]}
+    payload = {
+        "data": [
+            {
+                "asset": "btc",
+                "time": "2026-10-01T00:00:00.000000000Z",
+                "FlowInExUSD": "1000.0",
+                "FlowInExUSD-status": "unavailable",
+                "FlowInExUSD-status-time": "2026-10-01T00:00:00.000000000Z",
+                "FlowOutExUSD-status": "unavailable",
+            }
+        ]
+    }
     df = parse_timeseries(payload)
     assert [c for c in df.columns if "status" in c] == []
     # The metric itself survives; only the sidecars go.
