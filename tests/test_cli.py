@@ -1053,3 +1053,46 @@ def test_a_subset_horizon_run_keeps_the_other_horizons(tmp_path, monkeypatch):
         pathlib.Path(settings.resolver.table("gold", "model_score")) / "part-0.parquet"
     )
     assert {7, 30} <= set(out["horizon"])
+
+
+def test_a_models_subset_without_the_baseline_is_refused(tmp_path, monkeypatch, capsys):
+    """Without naive_persistence in the run no DM test can be formed, so the subset's stored
+    DM and Holm rows would be dropped and the Holm family silently shrink (a weaker correction)."""
+    monkeypatch.setattr(
+        cli, "load_config", lambda: (Settings(data_root=str(tmp_path)), [Asset(symbol="BTC")])
+    )
+
+    def no_work(_settings):
+        raise AssertionError("refused before the warehouse is read")
+
+    monkeypatch.setattr(cli, "_read_score_inputs", no_work)
+    assert main(["score", "--models", "historical_mean,random_walk_drift"]) == 2
+    err = capsys.readouterr().err
+    assert "must include naive_persistence" in err
+    assert "historical_mean" in err
+    assert not (tmp_path / "gold").exists()
+
+
+def test_a_rerun_replaces_the_short_history_rows_rather_than_duplicating_them(
+    tmp_path, monkeypatch
+):
+    """A symbol too short to fold gets a model_id '*' refusal per horizon. They belong to no
+    model, so a rerun of any models at that horizon must replace them."""
+    settings = Settings(data_root=str(tmp_path))
+    panel, estimates = _score_inputs()
+    dates = pd.date_range("2019-01-01", periods=50, freq="D")
+    short = pd.DataFrame({"symbol": "ETH", "metric_date": dates, "price_usd": 10.0})
+    short["panel_vintage_ts"] = panel["panel_vintage_ts"].iloc[0]
+    inputs = (pd.concat([panel, short], ignore_index=True), estimates)
+    monkeypatch.setattr(cli, "_read_score_inputs", lambda _settings: inputs)
+    gold = pathlib.Path(settings.resolver.table("gold", "model_score")) / "part-0.parquet"
+
+    cli.run_score(settings, [], ["naive_persistence", "historical_mean"], [30])
+    first = pd.read_parquet(gold)
+    assert (first["model_id"] == "*").sum() >= 1  # the fixture really produces the rows
+    cli.run_score(settings, [], ["naive_persistence", "random_walk_drift"], [30])
+
+    out = pd.read_parquet(gold)
+    keys = ["model_id", "symbol", "horizon", "fold", "metric"]
+    assert not out.duplicated(subset=keys).any()
+    assert (out["model_id"] == "*").sum() == (first["model_id"] == "*").sum()

@@ -23,6 +23,7 @@ from cryptoval.methods.registry import METHODS, run_methods
 from cryptoval.quarantine import QUARANTINE_COLUMNS, quarantine_impossible
 from cryptoval.scd2 import current_view, merge_scd2, reconcile_report
 from cryptoval.scoring.multiplicity import correct_family_wise
+from cryptoval.scoring.registry import BASELINE_MODEL_ID
 from cryptoval.scoring.registry import MODELS as SCORING_MODELS
 from cryptoval.scoring.runner import SCORE_COLUMNS, run_walk_forward
 from cryptoval.scoring.targets import HORIZONS, build_frame
@@ -640,6 +641,14 @@ def main(argv: list[str] | None = None) -> int:
         unknown = [m for m in ids or [] if m not in SCORING_MODELS]
         if unknown:
             print(f"unknown model(s): {unknown}; known: {sorted(SCORING_MODELS)}", file=sys.stderr)
+            return 2
+        if ids and BASELINE_MODEL_ID not in ids:
+            print(
+                f"--models must include {BASELINE_MODEL_ID}: every Diebold-Mariano test is "
+                f"defined against it, and without it this run drops its models' DM and Holm "
+                f"rows and shrinks the correction family (requested: {ids})",
+                file=sys.stderr,
+            )
             return 2
         try:
             hs = _parse_horizons(args.horizons) if args.horizons is not None else None
