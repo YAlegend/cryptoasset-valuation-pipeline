@@ -3,18 +3,20 @@
 **These are valuation estimates under stated assumptions, not investment advice. These assets are
 volatile and these methods disagree by design.**
 
-Run of 2026-10-17 against `data/cryptoval.duckdb`, panel vintage `2026-10-14 18:20:40.522565+01:00`.
+Run of 2026-10-18 against `data/cryptoval.duckdb`, panel vintage `2026-10-14 18:20:40.522565+01:00`.
 Panel: `fct_asset_metrics_daily`, 69,264 symbol-days, 24 symbols, 2015-01-01 to 2026-10-14.
-Results: `fct_econometric_test`, 1,215 rows, written by `python -m cryptoval.cli econ`. Every
+Results: `fct_econometric_test`, 1,248 rows, written by `python -m cryptoval.cli econ`. Every
 number below is a query against that table and is reproducible with the commands in the last
 section.
 
-**The result, in one sentence: market cap holds a long-run equilibrium with realized cap on 9 of
-20 testable assets and with traded volume on 2 of 18 after a Holm correction over 56 tests, and
-with active addresses on none — but only 6 of those 11 rest on series that pass both unit-root
-pre-tests, and in every one of the 6 the equilibrium is slow, with a half life of two months or
-more where it can be measured at all.** Metcalfe's law could not be tested as a law, because
-no asset has the equilibrium its exponent would describe.
+**The result, in one sentence: after a Holm correction over 56 tests, market cap holds a long-run
+equilibrium with realized cap on 9 of 20 testable assets (8 without USDC, whose peg makes it an
+identity) and with traded volume on 2 of 18, and with active addresses on none. Where an
+equilibrium exists, it is the fundamental that does the correcting, not price.** Only 6 of the 11
+rest on series that pass both unit-root pre-tests. On those 6 the gap between market cap and its
+fundamental halves in 6 to 137 days. On all 11 the fundamental's adjustment is significant, while
+market cap's own is significant on two, and on a third it runs the wrong way. Metcalfe's law could
+not be tested as a law, because no asset has the equilibrium its exponent would describe.
 
 **This is a full-sample, descriptive result. It uses future data by construction, supports no
 tradability claim, and is not comparable to Phase 4's out-of-sample null** (`reports/does-anything-beat-a-random-walk.md`).
@@ -180,25 +182,36 @@ after Holm.
 Johansen's trace test rejects rank 0 on **51 of 56** pairs, against Engle-Granger's 11. The two
 disagree on 42 pairs, and the agreeable reading, that Johansen confirms everything, is wrong.
 
-Johansen's rank counts *any* stationary linear combination of the two series, including one that
-puts all its weight on a single stationary series. Where the fundamental is I(0) or a conflict,
-which §3 shows is most of the volume and half the address series, Johansen finds "rank 1" from that
-series alone. It is also not exactly sized here. With the constant unrestricted
-(`det_order=0`), its critical values assume the walks drift. Measured on independent random walks
-(n = 2,500), it rejects 11.5% at drift/sd 0, 9.5% at 0.02 and about 6% at 0.05 and above, and
-this panel's median drift/sd for log market cap is 0.018. **Engle-Granger, measured at 5% to 7%
-over the same range, carries the claim**, and a Johansen "rank 1" here is not confirmation.
+Part of the gap has a known cause. Johansen's rank counts *any* stationary linear combination of
+the two series, including one that puts all its weight on a single stationary series. Where the
+fundamental is I(0) or a conflict, which §3 shows is most of the volume and half the address
+series, Johansen can find "rank 1" from that series alone.
+
+**Most of the gap is unexplained.** On the 24 pairs where *both* series are cleanly I(1), Johansen
+still finds rank 1 on 19, and Engle-Granger fails after Holm on 14 of those 19. A known size
+distortion does not account for that. With the constant unrestricted (`det_order=0`), Johansen's
+critical values assume the walks drift. Measured on independent random walks (n = 2,500, 300 pairs
+each) under this runner's AIC lag rule, it rejects 13.7% at drift/sd 0, 9.0% at 0.02 and 6.3% at
+0.05, and this panel's median drift/sd for log market cap is 0.018. That is up to roughly 2.7× its
+nominal 5%, but nowhere near 14 of 24. **And it was not measured at the lags that actually ran.**
+AIC picks 0 lags on iid walks, while the live pairs chose up to 14, at the cap on 25 of 56. Whether
+Engle-Granger lacks power here, or Johansen is oversized on heavy-tailed, serially dependent
+returns, is open. **Engle-Granger, measured at 5% to 7% across the same drift range, carries the
+claim**, and a Johansen "rank 1" here is not confirmation.
 
 The one survivor Johansen rejects is LDO on MVRV, rank 0 with a trace statistic of 13.95 against a
 95% critical value of 15.49.
 
 ### The coefficient against the ratio's assumption
 
-The MVRV ratio assumes β = 1. The median estimated β over the 20 MVRV assets is **0.992**, but the
-95% interval contains 1 on only **2** of them (ICP and UNI). The liquidity ratio also assumes 1;
-the median β is **0.595**, and no interval contains 1. On the liquidity pair, then, the ratio
-practitioners use is the wrong constraint even where an equilibrium exists. LTC is the clean
-example: cointegrated at β = 0.532, while its forced ratio is I(1).
+Counted over the **survivors only**: by §5's own reasoning, β from a pair that does not cointegrate
+is a spurious-regression coefficient and estimates nothing.
+
+The MVRV ratio assumes β = 1. Over the 9 MVRV survivors the median β is **1.110** (1.177 without
+USDC), and the 95% interval contains 1 on only **one**: ICP, [0.62, 1.16]. The liquidity ratio also
+assumes 1. Its 2 survivors have β = 0.735 (LINK) and 0.532 (LTC), and neither interval contains 1.
+So where an equilibrium exists, the ratio practitioners use is generally the wrong constraint. LTC
+is the clean example: cointegrated at β = 0.532, while its forced ratio is I(1).
 
 **The intervals are somewhat narrow.** β and its standard error come from Stock-Watson dynamic OLS
 (±2 leads and lags of the differenced regressor) with a Newey-West HAC covariance, not from the
@@ -228,33 +241,47 @@ A VECM is fitted **only where Engle-Granger survived Holm**. On the 45 pairs tha
 holds one `vecm_alpha` row with a NULL value and a reason naming the adjusted p-value. A speed of
 return to an equilibrium the correction rejected would read as a finding.
 
-α is market cap's share of yesterday's disequilibrium corrected today. Negative is reversion,
-positive divergence. The half life, log(0.5) / log|1 + α| days, exists only for −2 < α < 0, and is
-reported only there. The VAR lag order is the AIC's choice.
+**Both series can correct the gap, so the VECM reports both loadings.** With the gap
+z = log(market cap) + β_x·log(fundamental), α_mcap is market cap's share of yesterday's gap
+corrected today and α_fund is the fundamental's. Each corrects by moving *against* the gap:
+negative α_mcap, positive α_fund. The gap itself moves by **β′α = α_mcap + β_x·α_fund** a day, and
+its half life, log(0.5) / log|1 + β′α| days, exists only for −2 < β′α < 0. β here is the VECM's
+own maximum-likelihood estimate, close to but not the DOLS β in §4. The VAR lag order is the AIC's
+choice.
 
-| Pair | Asset | α | se | α / se | Half life (days) |
-|---|---|---|---|---|---|
-| liquidity | LTC | −0.0098 | 0.0021 | −4.6 | 71 |
-| MVRV | ICP | −0.0052 | 0.0015 | −3.4 | 132 |
-| MVRV | MKR | −0.0057 | 0.0030 | −1.9 | 122 |
-| MVRV | COMP | −0.0065 | 0.0043 | −1.5 | 106 |
-| MVRV | LDO | −0.0037 | 0.0027 | −1.4 | 185 |
-| MVRV | CRV | −0.0073 | 0.0078 | −0.9 | 94 |
-| MVRV | ADA | −0.0023 | 0.0027 | −0.9 | 297 |
-| liquidity | LINK | −0.0022 | 0.0026 | −0.9 | 309 |
-| MVRV | USDC | −0.0015 | 0.0069 | −0.2 | 457 |
-| MVRV | AVAX | +0.0021 | 0.0038 | +0.5 | none: positive |
-| MVRV | AAVE | **+0.0127** | 0.0041 | **+3.1** | none: **diverges** |
+An earlier draft of this chapter computed the half life from α_mcap alone, which assumes the
+fundamental never moves. That made every equilibrium look months slower than it is.
 
-**Where market cap reverts at all, it reverts slowly.** Only two α's are both negative and more than
-two standard errors from zero: LTC on liquidity (half life 71 days) and ICP on MVRV (132 days).
-Every other half life rests on an α that is not distinguishable from zero, and should be read as
-"no measurable adjustment by market cap". AAVE's market cap moves *away* from its realized-cap
-equilibrium, significantly so: whatever restores AAVE's equilibrium, it is not AAVE's price.
+| Pair | Asset | α_mcap (se) | t | α_fund (se) | t | β′α | Gap half life (days) |
+|---|---|---|---|---|---|---|---|
+| liquidity | LINK | −0.0022 (0.0026) | −0.9 | +0.126 (0.018) | +7.1 | −0.104 | **6** |
+| liquidity | LTC | −0.0098 (0.0021) | **−4.6** | +0.103 (0.019) | +5.6 | −0.066 | **10** |
+| MVRV | COMP | −0.0065 (0.0043) | −1.5 | +0.0136 (0.0016) | +8.6 | −0.024 | **28** |
+| MVRV | CRV | −0.0073 (0.0078) | −0.9 | +0.0140 (0.0044) | +3.2 | −0.022 | 31 |
+| MVRV | USDC | −0.0015 (0.0069) | −0.2 | +0.0186 (0.0069) | +2.7 | −0.021 | 33 |
+| MVRV | MKR | −0.0057 (0.0030) | −1.9 | +0.0099 (0.0014) | +6.9 | −0.015 | **47** |
+| MVRV | AVAX | +0.0021 (0.0038) | +0.5 | +0.0100 (0.0031) | +3.3 | −0.008 | 84 |
+| MVRV | AAVE | **+0.0127** (0.0041) | **+3.1** | +0.0131 (0.0021) | +6.4 | −0.008 | 88 |
+| MVRV | ICP | −0.0052 (0.0015) | **−3.4** | +0.0017 (0.0005) | +3.6 | −0.008 | 93 |
+| MVRV | LDO | −0.0037 (0.0027) | −1.4 | +0.0021 (0.0008) | +2.6 | −0.007 | **102** |
+| MVRV | ADA | −0.0023 (0.0027) | −0.9 | +0.0021 (0.0005) | +4.4 | −0.005 | **137** |
 
-These α's describe **market cap's** adjustment only. In a cointegrated pair the fundamental can do
-the adjusting instead, and an α near zero on market cap is consistent with that. The fundamental's
-own α is not reported (§7).
+Bold half lives are the 6 survivors resting on two cleanly I(1) series (§4).
+
+**The fundamental does the correcting.** α_fund has the correcting sign and is more than 2.6
+standard errors from zero on **all 11** survivors. α_mcap is significant with the correcting sign
+on only **two**, LTC and ICP. On AAVE it is significant with the **wrong** sign: AAVE's market cap
+moves *away* from its realized-cap equilibrium, and realized cap closes the gap faster than price
+widens it. On the other 8, market cap's own adjustment is indistinguishable from zero.
+
+Read plainly: where these equilibria exist, the fundamental moves toward price, not price toward
+the fundamental. For the MVRV pair that has a mechanical reading. Realized cap revalues every coin
+that moves at the day's price, so a rally that turns coins over pulls realized cap up behind
+market cap. That is an equilibrium, but it is not the "price is anchored to its cost basis" the
+practitioner literature means, and it gives price no pull toward any fair value.
+
+The gap's speed ranges from a half life of 6 days (LINK on liquidity) to 137 (ADA on MVRV).
+Liquidity equilibria close in days; realized-cap equilibria take one to four and a half months.
 
 ## 7. Declared gaps
 
@@ -266,7 +293,6 @@ One row per gap, each with its measurement.
 | §11.4 | NVT, as the literature means it | `volume_reported_spot_usd` is **exchange trading volume**, not on-chain transfer value; the `nvt_golden_ratio` method card already declares this objection. The liquidity pair tests market cap against market liquidity. USD volume is also units traded × price, so this pair, like realized cap, is not wholly free of price. |
 | §11.4 | A joint system | Bivariate pairs only. A joint Johansen over market cap and all three fundamentals at once is a reasonable test and is not built; interpreting a three-vector equilibrium is a different chapter's work. |
 | §11.4 | A searched lag order | The VAR lag order is AIC's choice up to a cap of 14 days, and **AIC chose the cap on 25 of 56 pairs**, so on those it wanted more lags than it was allowed. ADF's lag is also AIC's choice. Nothing is tuned beyond that. |
-| §11.4 | The fundamental's adjustment | Only market cap's α is reported (§6). A pair where the fundamental does all the adjusting shows α ≈ 0 here and looks like "no reversion". |
 | §11.4 | Four testable assets, discarded over short gaps | AVAX and MANA (Metcalfe), MKR and USDC (liquidity) are refused over gaps of 1 to 8 days (§2). A test on the longest contiguous segment would recover them. Not built: the rule is "refuse, never stitch", and choosing a segment is a decision the design did not make. |
 | §11.4 | GARCH, Markov-switching, DCC | §11.4's second chain. It answers a different question, writes a different table and needs `arch`; a later plan. |
 | §11.5 | Factor models, Fama-MacBeth, decile portfolios | Still blocked on the point-in-time top-N universe that §5 and §11.5 both require and no free source serves. |

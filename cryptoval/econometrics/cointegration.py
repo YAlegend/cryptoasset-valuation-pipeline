@@ -113,7 +113,9 @@ def johansen(y: pd.Series, x: pd.Series, lags: int = 1) -> dict[str, float]:
 
     NOT IN THE HOLM FAMILY, and not exactly sized. det_order=0 leaves the constant
     unrestricted, whose critical values assume the walks drift. Measured on independent
-    walks (n=2500): 11.5% rejections at drift/sd 0, 9.5% at 0.02, 6% at 0.05 and above.
+    walks (n=2500): 11.5% rejections at drift/sd 0, 9.5% at 0.02, 6% at 0.05 and above at
+    one lag; 13.7%, 9.0% and 6.3% under the runner's AIC rule, which picks 0 lags on iid
+    walks. The live pairs chose up to 14, and the size at those lags is NOT measured.
     This panel's median drift/sd is 0.018 for log market cap. The restricted-constant
     alternative is exact at zero drift but rejects 60% at 0.05, so it is worse here.
     Engle-Granger measured 5-7% over the same range and carries the claim.
