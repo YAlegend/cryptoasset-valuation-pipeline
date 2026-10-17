@@ -78,7 +78,7 @@ def test_hln_correction_shrinks_the_statistic_by_its_factor_where_it_is_large():
     # Uncorrected statistic: the same Bartlett-weighted Newey-West variance, HLN step removed.
     d = model**2 - baseline**2
     centred = d - d.mean()
-    gamma = [np.mean(centred**2)] + [np.mean(centred[k:] * centred[:-k]) for k in range(1, 30)]
+    gamma = [np.mean(centred**2)] + [np.sum(centred[k:] * centred[:-k]) / 50 for k in range(1, 30)]
     bartlett = sum((1.0 - k / 30) * gamma[k] for k in range(1, 30))
     uncorrected = d.mean() / np.sqrt((gamma[0] + 2.0 * bartlett) / 50)
     assert result.statistic == pytest.approx(uncorrected * 0.168**0.5, rel=1e-6)
@@ -105,3 +105,16 @@ def test_hac_lags_are_bartlett_weighted_not_equal_weighted():
     baseline = np.zeros(10)
     result = diebold_mariano(model, baseline, horizon=3)
     assert result.statistic == pytest.approx(16.8**0.5, rel=1e-9)
+
+
+def test_hac_autocovariances_divide_by_the_full_n_not_the_overlap():
+    """Hand-derived. d = [4, 0, 0, 4, 0, 0, 4, 0, 0, 4], n=10, h=3: mean 1.6, centred 2.4 and -1.6.
+    gamma_0 = 3.84. Divided by n: gamma_1 = -1.536, gamma_2 = -1.792. V = 3.84 + 2(2/3 * -1.536
+    + 1/3 * -1.792) = 1.792/3. HLN adjustment = 0.56. Statistic = 1.6 / sqrt(V/10) * sqrt(0.56)
+    = sqrt(24). Dividing by the overlap (n-k) gives V = 0.0711 and statistic 14.20: a different
+    answer.
+    """
+    model = np.array([2.0, 0.0, 0.0, 2.0, 0.0, 0.0, 2.0, 0.0, 0.0, 2.0])
+    baseline = np.zeros(10)
+    result = diebold_mariano(model, baseline, horizon=3)
+    assert result.statistic == pytest.approx(24**0.5, rel=1e-9)

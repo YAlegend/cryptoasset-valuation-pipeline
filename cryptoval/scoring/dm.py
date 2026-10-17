@@ -9,7 +9,9 @@ needs are exactly the ones a hand-rolled version omits:
   h=365, and every model then looks significantly better than the baseline. The lags are
   Bartlett-weighted (1 - k/h), not equal-weighted: the equal-weight (rectangular) kernel is
   not positive semi-definite, and it sent about half the h=90 and h=365 cases into the
-  variance refusal.
+  variance refusal. Each autocovariance divides by the full n, not by the n-k overlapping
+  terms: the Bartlett guarantee holds only with /n, and with /(n-k) the estimator can still
+  go negative.
 * THE HARVEY-LEYBOURNE-NEWBOLD CORRECTION. The uncorrected statistic over-rejects in small
   samples, which is every sample here. HLN scales it and refers it to a t distribution
   with n-1 degrees of freedom rather than the normal.
@@ -64,7 +66,7 @@ def diebold_mariano(errors_model, errors_baseline, horizon: int, power: int = 2)
     gamma_0 = float(np.mean(centred**2))
     variance = gamma_0
     for lag in range(1, min(horizon, n)):
-        gamma_k = float(np.mean(centred[lag:] * centred[:-lag]))
+        gamma_k = float(np.sum(centred[lag:] * centred[:-lag]) / n)
         w = 1.0 - lag / horizon
         variance += 2.0 * w * gamma_k
 
