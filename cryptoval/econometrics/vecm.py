@@ -27,12 +27,14 @@ def speed_of_adjustment(y: pd.Series, x: pd.Series, lags: int = 1) -> dict[str, 
     alpha = float(fitted.alpha[0, 0])
     stderr = float(fitted.stderr_alpha[0, 0])
 
-    # log(0.5)/log(1+alpha) is the days for half the gap to close, and it exists only
-    # while -2 < alpha < 0. Outside that the pair diverges or oscillates, and a number
-    # there would be read as a reversion speed.
+    # The gap's SIZE shrinks by |1 + alpha| a day, so half of it closes in
+    # log(0.5)/log|1 + alpha| days. That exists only while -2 < alpha < 0; below -1 the
+    # gap overshoots and flips sign but still shrinks. Outside the band the pair diverges,
+    # and a number there would be read as a reversion speed.
     half_life = float("nan")
     if -2.0 < alpha < 0.0:
-        half_life = float(np.log(0.5) / np.log1p(alpha))
+        shrink = abs(1.0 + alpha)
+        half_life = 0.0 if shrink == 0.0 else float(np.log(0.5) / np.log(shrink))
 
     return {
         "alpha": alpha,

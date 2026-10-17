@@ -95,3 +95,64 @@ def test_a_second_correction_refuses_rather_than_duplicating_rows():
     once = correct_family_wise(_p_rows([0.01, 0.2]))
     with pytest.raises(ValueError, match="2 dm_p_value_holm and 1 hypotheses_tested"):
         correct_family_wise(once)
+
+
+def test_the_correction_generalizes_to_another_metric_name_and_column_set():
+    columns = ["pair_id", "symbol", "metric", "value", "reason"]
+    scores = pd.DataFrame(
+        [
+            {
+                "pair_id": "p",
+                "symbol": "BTC",
+                "metric": "cointegration_p_value",
+                "value": 0.001,
+                "reason": None,
+            },
+            {
+                "pair_id": "p",
+                "symbol": "ETH",
+                "metric": "cointegration_p_value",
+                "value": 0.040,
+                "reason": None,
+            },
+        ]
+    )
+    out = correct_family_wise(
+        scores,
+        p_metric="cointegration_p_value",
+        columns=columns,
+        count_keys={"pair_id": "*", "symbol": "*"},
+    )
+    assert list(out.columns) == columns
+    assert (out["metric"] == "cointegration_p_value_holm").sum() == 2
+    assert out[out["metric"] == "hypotheses_tested"]["value"].iloc[0] == 2.0
+
+
+def test_a_second_pass_is_refused_for_a_generalized_metric_too():
+    """Review Focus 5: the generalization must not open a hole in the guard."""
+    columns = ["pair_id", "symbol", "metric", "value", "reason"]
+    scores = pd.DataFrame(
+        [
+            {
+                "pair_id": "p",
+                "symbol": "BTC",
+                "metric": "cointegration_p_value",
+                "value": 0.01,
+                "reason": None,
+            }
+        ]
+    )
+    once = correct_family_wise(
+        scores,
+        p_metric="cointegration_p_value",
+        columns=columns,
+        count_keys={"pair_id": "*", "symbol": "*"},
+    )
+    with pytest.raises(ValueError) as exc:
+        correct_family_wise(
+            once,
+            p_metric="cointegration_p_value",
+            columns=columns,
+            count_keys={"pair_id": "*", "symbol": "*"},
+        )
+    assert "already" in str(exc.value)

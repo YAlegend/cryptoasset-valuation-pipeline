@@ -56,3 +56,11 @@ def test_too_few_rows_is_refused_with_the_count():
     with pytest.raises(Unusable) as exc:
         speed_of_adjustment(y, x)
     assert str(MIN_COINT_ROWS - 1) in str(exc.value)
+
+
+def test_an_overshooting_pull_still_has_a_half_life_under_a_day():
+    """Alpha in (-2, -1) over-corrects, flipping the gap's sign each day while its SIZE
+    shrinks by |1 + alpha|. That is reversion, faster than a day, not a missing number."""
+    result = speed_of_adjustment(*_mean_reverting(speed=1.5))
+    assert -2.0 < result["alpha"] < -1.0  # the fixture really overshoots
+    assert 0.0 <= result["half_life_days"] < 1.0

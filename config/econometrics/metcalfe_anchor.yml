@@ -4,5 +4,5 @@ dependent: log_market_cap
 independent: log_addresses
 forced_coefficient: 2.0
 expected_coefficient: 2.0
-params: {lag_criterion: aic, alpha: 0.05}
+params: {lag_criterion: aic}
 citation: "Metcalfe (1995) via spec 11.4: value proportional to the square of the users, so the law predicts a coefficient of 2 on log addresses."

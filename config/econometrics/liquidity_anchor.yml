@@ -4,7 +4,7 @@ dependent: log_market_cap
 independent: log_volume
 forced_coefficient: 1.0
 expected_coefficient: null
-params: {lag_criterion: aic, alpha: 0.05}
+params: {lag_criterion: aic}
 # NOT NVT. volume_total_usd is EXCHANGE TRADING VOLUME, not on-chain transfer value,
 # which the nvt_golden_ratio method card already declares as an objection. This pair
 # tests market cap against market liquidity, and the chapter must say so.
