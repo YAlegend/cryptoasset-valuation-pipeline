@@ -115,10 +115,14 @@ def johansen(y: pd.Series, x: pd.Series, lags: int = 1) -> dict[str, float]:
     unrestricted, whose critical values assume the walks drift. Measured on independent
     walks (n=2500): 11.5% rejections at drift/sd 0, 9.5% at 0.02, 6% at 0.05 and above at
     one lag; 13.7%, 9.0% and 6.3% under the runner's AIC rule, which picks 0 lags on iid
-    walks. The live pairs chose up to 14, and the size at those lags is NOT measured.
+    walks. The live pairs chose up to 14. At those lags, on each pair's own dynamics
+    (null_size: fundamental shifted against market cap, 5,600 draws), it rejects 22.5%:
+    4.7% at 0-2 lags, 18.5% at 3-13 and 32.5% at the cap.
     This panel's median drift/sd is 0.018 for log market cap. The restricted-constant
     alternative is exact at zero drift but rejects 60% at 0.05, so it is worse here.
-    Engle-Granger measured 5-7% over the same range and carries the claim.
+    Engle-Granger measured 5-7% over the same range and carries the claim; on the
+    null_size draws it is 9.2%, about 5.8% without the two pairs whose market cap is
+    stationary on its own (MVRV ICP and AVAX), where it rejects whatever x is.
     """
     y_values, x_values = _aligned(y, x, name="johansen")
     result = coint_johansen(np.column_stack([y_values, x_values]), det_order=0, k_ar_diff=lags)

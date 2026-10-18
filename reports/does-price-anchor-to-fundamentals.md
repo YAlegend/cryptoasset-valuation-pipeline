@@ -9,13 +9,15 @@ Results: `fct_econometric_test`, 1,248 rows, written by `python -m cryptoval.cli
 number below is a query against that table and is reproducible with the commands in the last
 section.
 
-**The result, in one sentence: after a Holm correction over 56 tests, market cap holds a long-run
-equilibrium with realized cap on 9 of 20 testable assets (8 without USDC, whose peg makes it an
-identity) and with traded volume on 2 of 18, and with active addresses on none. Where an
-equilibrium exists, it is the fundamental that does the correcting, not price.** Only 6 of the 11
-rest on series that pass both unit-root pre-tests. On those 6 the gap between market cap and its
-fundamental halves in 6 to 137 days. On all 11 the fundamental's adjustment is significant, while
-market cap's own is significant on two, and on a third it runs the wrong way. Metcalfe's law could
+**The result, in one sentence: after a Holm correction over 56 tests and a check of each survivor
+against its own simulated null, market cap holds a long-run equilibrium with realized cap on 8 of
+20 testable assets (7 without USDC, whose peg makes it an identity) and with traded volume on 2 of
+18, and with active addresses on none. Where an equilibrium exists, it is the fundamental that does
+the correcting, not price.** Holm passed 11; ICP is withdrawn because its market cap is stationary
+on its own and Engle-Granger rejects for it with no fundamental at all (§4). Only 6 of the 10 rest
+on series that pass both unit-root pre-tests. On those 6 the gap between market cap and its
+fundamental halves in 6 to 137 days. On all 10 the fundamental's adjustment is significant, while
+market cap's own is significant on one, and on a second it runs the wrong way. Metcalfe's law could
 not be tested as a law, because no asset has the equilibrium its exponent would describe.
 
 **This is a full-sample, descriptive result. It uses future data by construction, supports no
@@ -140,21 +142,22 @@ Engle-Granger on the levels, `log(market_cap) = c + β·log(fundamental) + u`, t
 is stationary. **The Holm-Bonferroni family is these 56 tests and only these** (20 + 18 + 18). The
 hypothesis count is written to the table as the row with `pair_id = '*'`.
 
-| Pair | Tested | Raw p < 0.05 | Holm p < 0.05 |
-|---|---|---|---|
-| `mvrv_anchor` | 20 | 14 | **9** |
-| `liquidity_anchor` | 18 | 7 | **2** |
-| `metcalfe_anchor` | 18 | 2 | **0** |
-| total | 56 | 23 | **11** |
+| Pair | Tested | Raw p < 0.05 | Holm p < 0.05 | And past its own null |
+|---|---|---|---|---|
+| `mvrv_anchor` | 20 | 14 | 9 | **8** |
+| `liquidity_anchor` | 18 | 7 | 2 | **2** |
+| `metcalfe_anchor` | 18 | 2 | 0 | **0** |
+| total | 56 | 23 | 11 | **10** |
 
-The 11 survivors, each with its pre-test verdicts. β is the estimated coefficient with its standard
-error, and Johansen is the trace test's verdict at rank 0:
+The last column is the simulation in "Each survivor against its own null" below; it is not a
+warehouse query. The 11 Holm survivors, each with its pre-test verdicts. β is the estimated
+coefficient with its standard error, and Johansen is the trace test's verdict at rank 0:
 
 | Pair | Asset | n | Holm p | β (se) | `log mcap` | fundamental | Johansen |
 |---|---|---|---|---|---|---|---|
 | MVRV | AAVE | 2,195 | 4.4e-26 | 1.245 (0.083) | I(1) | conflict | rank 1 |
 | MVRV | LDO | 1,859 | 4.1e-08 | 1.532 (0.187) | I(1) | I(1) | **rank 0** |
-| MVRV | ICP | 1,982 | 6.2e-06 | 0.891 (0.138) | conflict | I(1) | rank 1 |
+| ~~MVRV~~ | ~~ICP~~ | 1,982 | 6.2e-06 | 0.891 (0.138) | conflict | I(1) | rank 1 — **withdrawn**, see below |
 | MVRV | COMP | 2,309 | 7.1e-05 | 1.334 (0.022) | I(1) | I(1) | rank 1 |
 | MVRV | USDC | 2,938 | 2.6e-04 | 1.026 (0.001) | conflict | conflict | rank 1 |
 | MVRV | AVAX | 2,212 | 7.0e-04 | 0.929 (0.008) | conflict | conflict | rank 1 |
@@ -164,10 +167,52 @@ error, and Johansen is the trace test's verdict at rank 0:
 | MVRV | CRV | 2,251 | 1.2e-02 | 1.110 (0.017) | conflict | conflict | rank 1 |
 | liquidity | LTC | 4,304 | 2.8e-02 | 0.532 (0.006) | I(1) | I(1) | rank 1 |
 
-**Only 6 of the 11 rest on two cleanly I(1) series**: LDO, COMP, MKR and ADA (MVRV), and LINK and
-LTC (liquidity). The other five are reported with that caveat attached. A conflict verdict on
+**Only 6 of the 10 rest on two cleanly I(1) series**: LDO, COMP, MKR and ADA (MVRV), and LINK and
+LTC (liquidity). The other four are reported with that caveat attached. A conflict verdict on
 either series means the cointegration p-value is computed on a premise the data does not clearly
 support.
+
+### Each survivor against its own null
+
+A conflict verdict is a warning; the simulation below measures what it costs.
+`python -m cryptoval.econometrics.null_size` rebuilds every tested pair with no equilibrium in
+it: the fundamental's daily differences are circularly shifted against market cap's and
+re-integrated, so each series keeps its own autocorrelation, fat tails and volatility clustering
+while the link between them is gone. The runner's own Engle-Granger, AIC lag rule and Johansen then
+run on 100 such draws per pair, 5,600 in all. On the unshifted pairs the script reproduces the
+mart's p-values exactly, and refuses to report otherwise.
+
+| Pair | Asset | Live p | Null p < 0.05 | Null p < Holm bar (8.9e-04) | Smallest null p |
+|---|---|---|---|---|---|
+| MVRV | **ICP** | 1.2e-07 | 100 of 100 | **51 of 100** | 3.1e-04 |
+| MVRV | AVAX | 1.4e-05 | 100 of 100 | 0 | 0.012 |
+| MVRV | LDO | 7.4e-10 | 44 of 100 | 0 | 0.020 |
+| MVRV | AAVE | 7.9e-28 | 0 | 0 | 0.070 |
+| MVRV | CRV | 2.5e-04 | 0 | 0 | 0.070 |
+| MVRV | ADA | 6.4e-05 | 0 | 0 | 0.28 |
+| MVRV | MKR | 2.2e-05 | 0 | 0 | 0.37 |
+| MVRV | COMP | 1.3e-06 | 0 | 0 | 0.61 |
+| MVRV | USDC | 4.9e-06 | 0 | 0 | 0.66 |
+| liquidity | LINK | 2.0e-04 | 0 | 0 | 0.17 |
+| liquidity | LTC | 6.0e-04 | 0 | 0 | 0.22 |
+
+The live p is Engle-Granger's raw p; the Holm bar is the strictest step, 0.05 / 56.
+
+**ICP is withdrawn.** Its market cap is stationary by ADF alone (p = 0.0002), so a regression of it
+on *any* series leaves a stationary residual: under the null, Engle-Granger clears the Holm bar for
+ICP on 51 of 100 draws. ICP's survival says its market cap mean-reverts, not that it is anchored
+to realized cap. It is also the only false survivor the null produces: over 100 null families of
+56 tests, Holm passes at least one in 51, and every one is ICP.
+
+**AVAX and LDO are kept, with a caveat.** Their null rejects at 0.05 on 100 and 44 of 100 draws,
+so a raw p near 0.05 would mean nothing for either. But no null draw comes near the Holm bar (the
+smallest null p is 0.012 for AVAX and 0.020 for LDO), while their live p-values are 1.4e-05 and
+7.4e-10. With 100 draws that bounds the null's chance of clearing the bar at roughly 3%, not at
+zero. The other eight survivors' nulls never reject even at 0.05.
+
+The pre-tests in §3 flagged this and did not act on it: they are reported beside the test and do
+not gate it. Making a stationary market cap a refusal would shrink the Holm family and move every
+adjusted p-value in this chapter, so it is declared in §7 rather than done here.
 
 **USDC's survival is the circularity this design exists to catch, not a finding.** A $1 peg makes
 `market_cap ≈ supply` and `realized_cap ≈ supply` by construction, so their log ratio is pinned
@@ -187,17 +232,25 @@ the two series, including one that puts all its weight on a single stationary se
 fundamental is I(0) or a conflict, which §3 shows is most of the volume and half the address
 series, Johansen can find "rank 1" from that series alone.
 
-**Most of the gap is unexplained.** On the 24 pairs where *both* series are cleanly I(1), Johansen
-still finds rank 1 on 19, and Engle-Granger fails after Holm on 14 of those 19. A known size
-distortion does not account for that. With the constant unrestricted (`det_order=0`), Johansen's
+**Independent walks do not explain the rest.** On the 24 pairs where *both* series are cleanly
+I(1), Johansen still finds rank 1 on 19, and Engle-Granger fails after Holm on 14 of those 19. The
+size distortion measured on independent walks does not account for that. With the constant unrestricted (`det_order=0`), Johansen's
 critical values assume the walks drift. Measured on independent random walks (n = 2,500, 300 pairs
 each) under this runner's AIC lag rule, it rejects 13.7% at drift/sd 0, 9.0% at 0.02 and 6.3% at
 0.05, and this panel's median drift/sd for log market cap is 0.018. That is up to roughly 2.7× its
-nominal 5%, but nowhere near 14 of 24. **And it was not measured at the lags that actually ran.**
-AIC picks 0 lags on iid walks, while the live pairs chose up to 14, at the cap on 25 of 56. Whether
-Engle-Granger lacks power here, or Johansen is oversized on heavy-tailed, serially dependent
-returns, is open. **Engle-Granger, measured at 5% to 7% across the same drift range, carries the
-claim**, and a Johansen "rank 1" here is not confirmation.
+nominal 5%, but nowhere near 14 of 24.
+
+**At the lags that actually ran, it is far worse.** AIC picks 0 lags on iid walks, while the live
+pairs chose up to 14, at the cap on 25 of 56. The null simulation above runs at those lags, on each
+pair's own dynamics, and there Johansen rejects a pair with no equilibrium in it 22.5% of the time:
+4.7% where AIC picks 0 to 2 lags, 18.5% at 3 to 13, and **32.5% at the cap**. By pair it is 7% for
+MVRV, but 32% for liquidity and 30% for Metcalfe, the pairs whose fundamentals are mostly conflicts
+or I(0) in §3. That is several times its nominal 5% and explains much of the 51 of 56, though even
+32.5% falls well short of 19 of 24 (79%) on the cleanly I(1) pairs; whether Engle-Granger also
+lacks power there is open. Engle-Granger on the same null rejects 9.2% at 0.05, and **about 5.8%
+once MVRV's ICP and AVAX, whose market caps are stationary on their own, are set aside** (they
+reject on all 100 draws each), in line with the 5% to 7% measured on independent walks. **Engle-Granger carries the claim**, and a Johansen "rank 1" here is not
+confirmation.
 
 The one survivor Johansen rejects is LDO on MVRV, rank 0 with a trace statistic of 13.95 against a
 95% critical value of 15.49.
@@ -207,8 +260,9 @@ The one survivor Johansen rejects is LDO on MVRV, rank 0 with a trace statistic 
 Counted over the **survivors only**: by §5's own reasoning, β from a pair that does not cointegrate
 is a spurious-regression coefficient and estimates nothing.
 
-The MVRV ratio assumes β = 1. Over the 9 MVRV survivors the median β is **1.110** (1.177 without
-USDC), and the 95% interval contains 1 on only **one**: ICP, [0.62, 1.16]. The liquidity ratio also
+The MVRV ratio assumes β = 1. Over the 8 MVRV survivors the median β is **1.177** (1.245 without
+USDC), and the 95% interval contains 1 on **none** of them. The only survivor whose interval did,
+ICP at [0.62, 1.16], is the one withdrawn above. The liquidity ratio also
 assumes 1. Its 2 survivors have β = 0.735 (LINK) and 0.532 (LTC), and neither interval contains 1.
 So where an equilibrium exists, the ratio practitioners use is generally the wrong constraint. LTC
 is the clean example: cointegrated at β = 0.532, while its forced ratio is I(1).
@@ -262,15 +316,18 @@ fundamental never moves. That made every equilibrium look months slower than it 
 | MVRV | MKR | −0.0057 (0.0030) | −1.9 | +0.0099 (0.0014) | +6.9 | −0.015 | **47** |
 | MVRV | AVAX | +0.0021 (0.0038) | +0.5 | +0.0100 (0.0031) | +3.3 | −0.008 | 84 |
 | MVRV | AAVE | **+0.0127** (0.0041) | **+3.1** | +0.0131 (0.0021) | +6.4 | −0.008 | 88 |
-| MVRV | ICP | −0.0052 (0.0015) | **−3.4** | +0.0017 (0.0005) | +3.6 | −0.008 | 93 |
+| ~~MVRV~~ | ~~ICP~~ (withdrawn, §4) | −0.0052 (0.0015) | −3.4 | +0.0017 (0.0005) | +3.6 | −0.008 | 93 |
 | MVRV | LDO | −0.0037 (0.0027) | −1.4 | +0.0021 (0.0008) | +2.6 | −0.007 | **102** |
 | MVRV | ADA | −0.0023 (0.0027) | −0.9 | +0.0021 (0.0005) | +4.4 | −0.005 | **137** |
 
 Bold half lives are the 6 survivors resting on two cleanly I(1) series (§4).
 
+The VECM still ran on ICP, because the runner fits every Holm survivor; its row stays in the table
+and is not counted.
+
 **The fundamental does the correcting.** α_fund has the correcting sign and is more than 2.6
-standard errors from zero on **all 11** survivors. α_mcap is significant with the correcting sign
-on only **two**, LTC and ICP. On AAVE it is significant with the **wrong** sign: AAVE's market cap
+standard errors from zero on **all 10** survivors. α_mcap is significant with the correcting sign
+on only **one**, LTC; the other was ICP, whose market cap reverts on its own. On AAVE it is significant with the **wrong** sign: AAVE's market cap
 moves *away* from its realized-cap equilibrium, and realized cap closes the gap faster than price
 widens it. On the other 8, market cap's own adjustment is indistinguishable from zero.
 
@@ -292,7 +349,8 @@ One row per gap, each with its measurement.
 | §11.4 | Structural breaks | One full-sample Engle-Granger over up to 4,304 days (2015 to 2026) can miss a regime shift entirely, or report one equilibrium where there were two. No rolling or recursive re-test is in scope. Gregory-Hansen, cointegration with one endogenous break, is the named alternative and is not built. |
 | §11.4 | NVT, as the literature means it | `volume_reported_spot_usd` is **exchange trading volume**, not on-chain transfer value; the `nvt_golden_ratio` method card already declares this objection. The liquidity pair tests market cap against market liquidity. USD volume is also units traded × price, so this pair, like realized cap, is not wholly free of price. |
 | §11.4 | A joint system | Bivariate pairs only. A joint Johansen over market cap and all three fundamentals at once is a reasonable test and is not built; interpreting a three-vector equilibrium is a different chapter's work. |
-| §11.4 | A searched lag order | The VAR lag order is AIC's choice up to a cap of 14 days, and **AIC chose the cap on 25 of 56 pairs**, so on those it wanted more lags than it was allowed. ADF's lag is also AIC's choice. Nothing is tuned beyond that. |
+| §11.4 | A searched lag order | The VAR lag order is AIC's choice up to a cap of 14 days, and **AIC chose the cap on 25 of 56 pairs**, so on those it wanted more lags than it was allowed. ADF's lag is also AIC's choice. Nothing is tuned beyond that. At the cap Johansen rejects 32.5% of null pairs (§4), so a Johansen verdict at 14 lags carries almost no information here. |
+| §11.4 | Pre-tests that gate | ADF/KPSS are reported beside Engle-Granger and never refuse it, so a pair whose market cap is stationary on its own enters the Holm family and can survive it. ICP did, and is withdrawn by the null simulation (§4) rather than by the runner. A refusal rule would shrink the family and move every adjusted p-value; it is not built. |
 | §11.4 | Four testable assets, discarded over short gaps | AVAX and MANA (Metcalfe), MKR and USDC (liquidity) are refused over gaps of 1 to 8 days (§2). A test on the longest contiguous segment would recover them. Not built: the rule is "refuse, never stitch", and choosing a segment is a decision the design did not make. |
 | §11.4 | GARCH, Markov-switching, DCC | §11.4's second chain. It answers a different question, writes a different table and needs `arch`; a later plan. |
 | §11.5 | Factor models, Fama-MacBeth, decile portfolios | Still blocked on the point-in-time top-N universe that §5 and §11.5 both require and no free source serves. |
@@ -310,6 +368,7 @@ symmetric check, and §4 shows why it cannot do that job on this panel.
 ```bash
 python -m cryptoval.cli econ                 # 3 pairs x 24 assets, ~20 s
 cd dbt && ../.venv/bin/dbt build --select fct_econometric_test --profiles-dir . && cd ..
+python -m cryptoval.econometrics.null_size   # the null simulation in §4, 5,600 fits, ~11 min
 ```
 
 `make all` now runs `econ` after `score` and before the last `dbt` build.
@@ -343,6 +402,8 @@ where metric like 'vecm_%' and value is not null order by 1, 2, 3;
 The pre-test verdicts in §3 classify each series from its `adf_p_value` and `kpss_p_value` rows
 (`independent_*` for the fundamental, `ratio_*` for the constrained ratio) at 0.05, by the table in
 §3. The β intervals in §4 are `cointegration_coefficient ± 1.96 × cointegration_coefficient_stderr`.
-The Johansen and Engle-Granger size figures in §4 are simulations, not warehouse queries. They are
-recorded in the docstring of `cryptoval/econometrics/cointegration.py::johansen` and were measured
-on 300 to 400 independent-walk pairs of 2,500 days each.
+The Johansen and Engle-Granger size figures in §4 are simulations, not warehouse queries. The
+independent-walk figures were measured on 300 to 400 pairs of 2,500 days each; the figures on this
+panel's own pairs, and the null check of every survivor, are printed by `null_size`, which is
+seeded and reproduces them exactly. Both are recorded in the docstring of
+`cryptoval/econometrics/cointegration.py::johansen`.
