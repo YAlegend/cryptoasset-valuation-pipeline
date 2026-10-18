@@ -84,3 +84,28 @@ def test_non_convergence_is_refused_with_the_flag(monkeypatch):
     monkeypatch.setattr(garch, "arch_model", lambda *a, **k: _Model())
     with pytest.raises(Unusable, match="flag 4: Iteration limit reached"):
         garch.fit_garch(_simulate(100))
+
+
+def test_a_half_life_longer_than_the_sample_is_refused_with_both_numbers(monkeypatch):
+    """Live run, 2026-10-18: BTC, BNB and DOGE fitted persistence a hair under 1 and
+    reported half lives of ~1e11 days. That is the optimizer on the stationarity bound,
+    not a measurement: no sample of 4,308 days can measure a 1e11-day decay."""
+
+    class _Res:
+        convergence_flag = 0
+        nobs = 4308
+        params = pd.Series({"omega": 0.2, "alpha[1]": 0.105, "beta[1]": 0.8949999, "nu": 3.1})
+        std_resid = conditional_volatility = pd.Series([1.0])
+
+    class _Model:
+        def fit(self, disp):
+            return _Res()
+
+    monkeypatch.setattr(garch, "arch_model", lambda *a, **k: _Model())
+    fit = garch.fit_garch(_simulate(100))
+    assert np.isnan(fit["half_life_days"])
+    assert "exceeds the 4308-day sample" in fit["half_life_reason"]
+
+
+def test_a_measurable_half_life_has_no_reason():
+    assert garch.fit_garch(_simulate())["half_life_reason"] is None

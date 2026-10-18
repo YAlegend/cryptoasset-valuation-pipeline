@@ -87,9 +87,7 @@ def run_volatility(
     def emit(model_id: str, symbol: str, values: dict, keys: tuple, n: float) -> None:
         for key in keys:
             value = float(values[key])
-            reason = None
-            if key == "half_life_days" and np.isnan(value):
-                reason = f"persistence {values['persistence']:.4f} >= 1: no half life"
+            reason = values.get("half_life_reason") if key == "half_life_days" else None
             rows.append(
                 _row(
                     model_id=model_id,

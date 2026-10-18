@@ -62,9 +62,21 @@ def fit_garch(returns: pd.Series) -> dict[str, Any]:
     persistence = float(params["alpha[1]"] + params["beta[1]"])
     # A shock's effect on variance decays by `persistence` a day; at or above 1 the
     # process is integrated and never halves, so a number there would be read as a speed.
-    half_life = (
-        float(np.log(0.5) / np.log(persistence)) if 0.0 < persistence < 1.0 else float("nan")
-    )
+    # A half life longer than the sample is the optimizer on the stationarity bound, not
+    # a measurement (live run 2026-10-18: BTC, BNB, DOGE at ~1e11 days).
+    n = int(result.nobs)
+    half_life, reason = float("nan"), None
+    if not 0.0 < persistence < 1.0:
+        reason = f"persistence {persistence:.4f} >= 1: an integrated variance has no half life"
+    else:
+        days = float(np.log(0.5) / np.log(persistence))
+        if days > n:
+            reason = (
+                f"half life {days:.3g} days exceeds the {n}-day sample (persistence "
+                f"{persistence:.6f}, at the stationarity bound): not measurable here"
+            )
+        else:
+            half_life = days
     return {
         "omega": float(params["omega"]),
         "alpha": float(params["alpha[1]"]),
@@ -72,7 +84,8 @@ def fit_garch(returns: pd.Series) -> dict[str, Any]:
         "nu": float(params["nu"]),
         "persistence": persistence,
         "half_life_days": half_life,
-        "n": float(result.nobs),
+        "half_life_reason": reason,
+        "n": float(n),
         "std_resid": result.std_resid,
         "cond_vol": result.conditional_volatility,
     }
