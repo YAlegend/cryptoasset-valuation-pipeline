@@ -3,7 +3,7 @@
 **These are valuation estimates under stated assumptions, not investment advice. These assets are
 volatile and these methods disagree by design.**
 
-Run of 2026-10-18 against `data/cryptoval.duckdb`, panel vintage `2026-10-18 13:11:26+01:00`.
+Run of 2026-10-18 against `data/cryptoval.duckdb`, panel vintage `2026-10-18 16:44:17+01:00`.
 Crypto panel: `fct_asset_metrics_daily`, 69,379 symbol-days, 24 symbols, 2015-01-01 to 2026-10-18.
 Traditional panel: `fct_equity_prices_daily`, 20,756 rows, 7 series (TSLA, AAPL, AMZN, GOOGL, META,
 GOLD, DXY), 2015-01-02 to 2026-10-16. Results: `fct_volatility_test`, 1,623 rows, written by
@@ -67,18 +67,18 @@ to compare, and this chapter does not pretend to reproduce them.
 **ARCH-LM (7 lags), H0 no clustering: rejected on 20 of 21 after Holm.** Every statistic but one is
 above 63; the exception is POL (19.7, raw p 0.0062, Holm 0.37), the shortest series in the panel.
 
-**GARCH(1,1)-t persistence** α+β runs from 0.908 (POL) to the stationarity bound:
+**GARCH(1,1)-t persistence** α+β runs from 0.907 (POL) to the stationarity bound:
 
 | Asset | α | β | α+β | Half life (days) |
 |---|---|---|---|---|
 | MKR | 0.148 | 0.781 | 0.929 | 9.4 |
-| POL | 0.133 | 0.775 | 0.908 | 7.2 |
-| MANA | 0.209 | 0.750 | 0.959 | 16.4 |
+| POL | 0.133 | 0.775 | 0.907 | 7.1 |
+| MANA | 0.208 | 0.751 | 0.958 | 16.3 |
 | AAVE | 0.117 | 0.851 | 0.967 | 20.7 |
 | ADA | 0.169 | 0.798 | 0.967 | 20.8 |
-| LINK | 0.083 | 0.903 | 0.986 | 49.1 |
-| BCH | 0.098 | 0.896 | 0.994 | 110.2 |
-| UNI | 0.026 | 0.970 | 0.997 | 196.1 |
+| LINK | 0.083 | 0.904 | 0.986 | 49.0 |
+| BCH | 0.098 | 0.896 | 0.994 | 109.4 |
+| UNI | 0.026 | 0.970 | 0.997 | 196.3 |
 | BTC | 0.105 | 0.895 | 1.000 | — |
 | ETH | 0.169 | 0.831 | 1.000 | — |
 
@@ -92,7 +92,7 @@ possible form of clustering and also a sign that one GARCH over 2015-2026 is ave
 regimes it cannot separate (§5).
 
 **EGARCH(1,1,1)-t asymmetry γ, H0 symmetric response: 0 of 21 after Holm.** Four are below 0.05 raw
-(ALGO 0.0009, LTC 0.0079, DOT 0.017, AVAX 0.025); the smallest Holm-adjusted is ALGO at 0.0545. The
+(ALGO 0.0009, LTC 0.0078, DOT 0.017, AVAX 0.026); the smallest Holm-adjusted is ALGO at 0.0558. The
 sign leans one way — **γ > 0 on 17 of 21**, the inverse of the equity leverage effect, meaning rises
 raise volatility at least as much as falls — but no single asset carries it past the correction.
 
@@ -125,13 +125,13 @@ result; a claim that volatility alone does is rejected.
 A two-regime Markov-switching model (switching mean and variance) separates a calm and a turbulent
 regime on all 21 assets. The turbulent regime's variance is 5.0 to 27.0 times the calm one's; BTC's
 calm and turbulent variances are 2.9 and 29.4 (daily standard deviations of 1.7% and 5.4%), with
-expected durations of 10.3 and 5.6 days, and BTC spends 31.7% of days in the turbulent regime.
+expected durations of 10.3 and 5.6 days, and BTC spends 31.8% of days in the turbulent regime.
 **These are estimates, not tests**: the likelihood-ratio test of two regimes against one has a
 non-standard distribution, and no p-value from it is reported.
 
 The dissertation selected October-November 2021 "precisely to examine correlation during the peak
 of the bull market". Was the peak turbulent? **For BTC, yes**: its mean turbulent probability over
-those 61 days is 0.539 against an unconditional 0.317. Across assets it is a split: the peak was
+those 61 days is 0.539 against an unconditional 0.318. Across assets it is a split: the peak was
 more turbulent than the asset's own average on **10 of 20** (ALGO, AVAX, BNB, BTC, COMP, DOT, ICP,
 LDO, LTC, MANA) and calmer on the other 10 — AAVE (0.067), LINK (0.037), SNX (0.041) and UNI
 (0.055) were almost entirely calm. "The peak" was not one regime across the market, which is itself
@@ -142,7 +142,7 @@ a version of the dissertation's point that the assets "part company".
 **Engle-Sheppard, H0 constant conditional correlation: rejected on 14 of 34 pairs after Holm** —
 11 of 20 BTC-crypto pairs (AAVE, ADA, AVAX, BCH, BNB, CRV, DOT, ETH, ICP, LDO, SNX) and 3 of 14
 crypto-equity pairs (BTC|TSLA, ETH|AAPL, ETH|TSLA). BTC|ETH is the strongest rejection in the
-family (statistic 134.5). This is the dissertation's concluding sentence as a hypothesis, and on
+family (statistic 134.4). This is the dissertation's concluding sentence as a hypothesis, and on
 half the crypto pairs it holds. On the other half — LTC, DOGE, LINK, MKR, MANA among them — a
 constant correlation is not rejected, so a single window would not have misled there.
 
