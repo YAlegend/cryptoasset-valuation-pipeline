@@ -76,6 +76,13 @@ SQL_BUILDERS: dict[str, Callable[[dt.date, dt.date], str]] = {
 }
 
 
+def plain_dtypes(frame: pd.DataFrame) -> pd.DataFrame:
+    """BigQuery DATE arrives as db_dtypes' extension type, which Parquet records by name and
+    pandas cannot read back without db_dtypes imported. Bronze holds plain dates instead."""
+    dates = [c for c in frame.columns if str(frame[c].dtype) == "dbdate"]
+    return frame.astype({c: object for c in dates})
+
+
 class BigQueryClient:
     """Dry-run and run against one named project, never the gcloud default."""
 
@@ -100,4 +107,4 @@ class BigQueryClient:
         config = self._bigquery.QueryJobConfig(maximum_bytes_billed=max_bytes)
         job = self._client.query(sql, job_config=config)
         frame = job.result().to_dataframe(create_bqstorage_client=False)
-        return frame, int(job.total_bytes_billed or 0)
+        return plain_dtypes(frame), int(job.total_bytes_billed or 0)

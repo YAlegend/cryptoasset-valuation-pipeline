@@ -13,6 +13,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 
+import db_dtypes  # noqa: F401 -- reads run cf502431's bronze, written before plain_dtypes
 import pandas as pd
 
 from cryptoval.budget import ByteBudgetGate

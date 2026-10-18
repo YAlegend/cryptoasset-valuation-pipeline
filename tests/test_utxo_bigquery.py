@@ -36,3 +36,14 @@ def test_an_unconfigured_project_is_refused_before_any_client_is_built():
 def test_settings_name_the_sandbox_project():
     settings, _ = load_config()
     assert settings.bigquery_project == "cryptoval-sandbox-3141"
+
+
+def test_results_land_as_plain_dates_not_the_db_dtypes_extension():
+    import db_dtypes  # noqa: F401
+    import pandas as pd
+
+    from cryptoval.utxo.bigquery import plain_dtypes
+
+    frame = pd.DataFrame({"d": pd.Series([dt.date(2009, 1, 3)], dtype="dbdate"), "n": [1]})
+    out = plain_dtypes(frame)
+    assert out["d"].dtype == object and out["d"].iloc[0] == dt.date(2009, 1, 3)
