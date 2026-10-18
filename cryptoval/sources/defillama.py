@@ -345,6 +345,11 @@ def parse_tvl_history(payload: dict) -> pd.DataFrame:
     return frame[TVL_COLUMNS]
 
 
+# DefiLlama publishes no tvl array for these: Chainlink's TVL is a true zero, and Ethereum
+# is a chain, not a protocol. Skipping them is expected, not a partial ingest.
+NO_TVL_PROTOCOLS = frozenset({"Chainlink Requests", "Ethereum"})
+
+
 class DefiLlamaTvlSource:
     """Protocol TVL history, with a payload-size guard.
 
@@ -381,6 +386,8 @@ class DefiLlamaTvlSource:
         errors: list[str] = []
         rows_in = 0
         for protocol in wanted:
+            if protocol in NO_TVL_PROTOCOLS:
+                continue
             slug = slugs.get(protocol)
             if slug is None:
                 errors.append(f"no DefiLlama slug for configured protocol {protocol!r}")

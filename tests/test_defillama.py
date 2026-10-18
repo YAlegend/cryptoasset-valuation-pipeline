@@ -545,6 +545,22 @@ def test_tvl_source_refuses_a_payload_above_its_size_guard(monkeypatch, load_fix
     assert any("exceeds the" in e and "MB" in e for e in result.errors)
 
 
+def test_tvl_source_skips_known_no_tvl_protocols_but_flags_others(monkeypatch, load_fixture):
+    from cryptoval.config import Asset
+
+    overview = load_fixture("defillama_overview_slugs.json")
+    empty = {"name": "x", "tvl": []}
+    monkeypatch.setattr(
+        "cryptoval.sources.defillama.get_with_retry",
+        lambda client, url, params=None, **kw: overview if "/overview/" in url else empty,
+    )
+    eth = Asset(symbol="ETH", cm_id="eth", gecko_id="ethereum", defillama_slugs=["Ethereum"])
+    result = DefiLlamaTvlSource().fetch(
+        dt.date(2020, 1, 1), dt.date(2026, 10, 13), [eth, _aave_asset()], client=None
+    )
+    assert result.errors == ("Aave V3: no tvl array in the payload",)
+
+
 def test_two_identical_tvl_fetches_change_no_stored_row(monkeypatch, load_fixture):
     """Same int64/float64 trap as the fee history: the vendor sends an int for a small TVL."""
     overview = load_fixture("defillama_overview_slugs.json")
