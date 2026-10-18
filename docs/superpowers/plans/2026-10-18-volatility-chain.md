@@ -478,7 +478,9 @@ def arch_lm(returns: pd.Series, lags: int = ARCH_LM_LAGS) -> dict[str, float]:
     """Engle (1982). H0: no ARCH effects, i.e. volatility does not cluster."""
     _check(returns, "arch_lm")
     values = returns.to_numpy(dtype="float64")
-    statistic, p_value, _, _ = het_arch(values - values.mean(), nlags=lags)
+    statistic, p_value, _, _ = het_arch(
+        values - values.mean(), nlags=lags, result_object=False
+    )
     return {"statistic": float(statistic), "p_value": float(p_value), "n": float(len(values))}
 
 
