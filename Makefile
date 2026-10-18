@@ -1,7 +1,7 @@
 PY := .venv/bin/python
 PIP := .venv/bin/pip
 
-.PHONY: setup test test-integration lint fmt ingest backfill validate reconcile seed cards estimate score econ vol utxo utxo-derive dbt all
+.PHONY: setup test test-integration lint fmt ingest backfill validate reconcile seed cards estimate score econ vol utxo utxo-derive dashboard dbt all
 
 setup:
 	python3 -m venv .venv
@@ -16,10 +16,10 @@ test-integration:
 	$(PY) -m pytest -v -m integration
 
 lint:
-	.venv/bin/ruff check cryptoval tests
+	.venv/bin/ruff check cryptoval tests dashboard
 
 fmt:
-	.venv/bin/ruff format cryptoval tests
+	.venv/bin/ruff format cryptoval tests dashboard
 
 ingest:
 	$(PY) -m cryptoval.cli ingest --trailing-days 30
@@ -58,6 +58,10 @@ utxo:
 
 utxo-derive:
 	$(PY) -m cryptoval.cli utxo derive
+
+# Reads the marts read-only, one connection per query, so it can stay open during `make all`.
+dashboard:
+	$(PY) -m streamlit run dashboard/app.py
 
 dbt:
 	# full-refresh: a seed CSV that gained a column fails to load otherwise

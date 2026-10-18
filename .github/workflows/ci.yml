@@ -20,7 +20,7 @@ jobs:
           pip install -r requirements.txt
           pip install -e .
       - name: Lint
-        run: ruff check cryptoval tests
+        run: ruff check cryptoval tests dashboard
       - name: Unit tests
         run: pytest -v --cov=cryptoval --cov-report=term-missing
       - name: dbt parse
