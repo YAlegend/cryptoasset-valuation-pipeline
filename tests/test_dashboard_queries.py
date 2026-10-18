@@ -3,10 +3,10 @@ import math
 
 import duckdb
 import pytest
+from dashboard_fixture import DCF_INPUTS, LAST, PREV, build
 
 from cryptoval.dashboard import queries as q
 from cryptoval.methods.cashflow import three_stage_pv
-from tests.dashboard_fixture import DCF_INPUTS, LAST, PREV, build
 
 
 @pytest.fixture

@@ -2,9 +2,8 @@ import pathlib
 
 import duckdb
 import pytest
+from dashboard_fixture import build
 from streamlit.testing.v1 import AppTest
-
-from tests.dashboard_fixture import build
 
 APP = str(pathlib.Path(__file__).resolve().parent.parent / "dashboard" / "app.py")
 DISCLAIMER = "not investment advice"
