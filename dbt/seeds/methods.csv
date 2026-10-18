@@ -1,4 +1,6 @@
 method_id,family,requires,min_density,min_rows,citation,returns_fair_value
+active_price,E_cost,realized_cap|active_supply,0.5,30,Cointime Economics (Puell and Check): active price,true
+aviv,E_cost,market_cap_usd|liveliness|investor_cap_usd,0.5,30,Cointime Economics (Puell and Check): active value to investor value,false
 bond_target_yield,C_cashflow,total_fees_usd|supply|price_usd,0.5,180,"Spec 10.4, bond-style target yield = annual fees / (risk free + staking premium)",true
 crypto_qtm,A_monetary,volume_total_usd|supply|price_usd,0.6,180,"dissertation section 3.1, crypto quantity theory of money",true
 crypto_qtm_panel_velocity,A_monetary,volume_total_usd|supply|price_usd|velocity_total,0.6,180,dissertation section 3.1 as literally specified; retained to measure the circularity,true
@@ -30,7 +32,11 @@ price_to_tvl,D_multiples,price_usd|supply|tvl_usd,0.5,365,"P/TVL, spec 10.5",tru
 price_to_utility,D_multiples,price_usd|velocity_total|supply,0.6,730,"dissertation section 3.6, price-to-utility ratio",true
 puell_multiple,E_cost,issuance_usd|price_usd,0.9,730,"David Puell (2019), Puell multiple; spec 6.2 derives it from free inputs",true
 realized_price,E_cost,realized_cap|supply,0.5,30,"Coinmetrics (2018), realized capitalisation; dissertation section 3.5",true
+rpv,E_cost,realized_profit_usd|market_cap_usd,0.5,30,"Dissertation 6.1, realised profits-to-value ratio",false
 sector_cohort_zscore,D_multiples,market_cap_usd|net_revenue_usd|sector,0.3,1,Sector-cohorted relative valuation (spec 10.5),false
+slrv,E_cost,hodl_rc_0d|hodl_rc_6m_1y,0.5,30,"Dissertation 5.5, short-to-long-term realised value ratio",false
+sthpl,E_cost,price_usd|sth_realized_cap|sth_supply,0.5,30,"Dissertation 6.2, short-term-holder profit/loss (computed as STH-MVRV, Plan 3b Ruling 3)",false
 stock_to_flow,F_shelf,market_cap_usd|supply|issuance_usd|price_usd,0.9,730,"PlanB (2019), Modeling Bitcoin Value with Scarcity; falsified post-2021",true
 supply_effect_counter_model,C_cashflow,market_cap_usd|supply|price_usd,0.5,365,"Spec 10.4's counter-model: fee burn and staking yield change the SUPPLY PATH, not value",true
 thermocap_floor,E_cost,thermocap_usd|supply,0.5,30,Nick Carter / Coinmetrics thermocap; dissertation section 3.5,true
+true_market_mean,E_cost,investor_cap_usd|active_supply,0.5,30,Cointime Economics (Puell and Check): true market mean price,true

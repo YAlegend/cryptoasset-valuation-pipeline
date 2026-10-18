@@ -51,10 +51,10 @@ def test_every_registered_method_has_a_config_and_vice_versa():
     assert set(METHODS) == set(load_method_specs())
 
 
-def test_every_method_has_a_card_on_disk_and_the_registry_holds_all_35():
+def test_every_method_has_a_card_on_disk_and_the_registry_holds_all_41():
     """`make cards` must have been re-run: a config with no card is an unpublished method.
 
-    35 = 14 from Plan 2 + 21 from Plan 3. A count that drifts without a plan entry is a
+    41 = 14 from Plan 2 + 21 from Plan 3 + 6 from Plan 3b (Family E(b)). A count that drifts without a plan entry is a
     method someone added without a card or a config.
     """
     import pathlib
@@ -65,4 +65,4 @@ def test_every_method_has_a_card_on_disk_and_the_registry_holds_all_35():
     cards = {p.stem for p in pathlib.Path("docs/methods").glob("*.md")}
     missing = sorted(set(load_method_specs()) - cards)
     assert not missing, f"method(s) with no card on disk -- run `make cards`: {missing}"
-    assert len(METHODS) == 35
+    assert len(METHODS) == 41

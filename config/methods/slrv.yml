@@ -1,0 +1,15 @@
+method_id: slrv
+family: E_cost
+requires: [hodl_rc_0d, hodl_rc_6m_1y]
+min_density: 0.5
+min_rows: 30
+returns_fair_value: false
+params: {}
+citation: "Dissertation 5.5, short-to-long-term realised value ratio"
+
+failure_modes:
+- 'Daily grain: the "1-day wave" is coins created on the day and unspent at its end, not a rolling
+  24 h band (Plan 3b Ruling 2), so the level is not directly comparable with Glassnode''s SLRV.'
+- Returns no fair value by declaration; the dissertation reads thresholds (below 0.04 in bear markets).
+assumptions:
+- Realized-cap weighting values each coin at the daily close of the day it was created.
