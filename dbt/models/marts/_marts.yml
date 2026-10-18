@@ -287,6 +287,15 @@ models:
           Sum of the symbol's configured components' TVL for the day, USD. NULL when no
           component reported, never 0.0 by aggregation.
 
+  - name: fct_btc_cointime_daily
+    description: >
+      Bitcoin coin-age series derived from the BigQuery creation x spend matrix (Plan 3b).
+      Empty until the extraction covers genesis to its cutoff without a gap. utxo_supply and
+      utxo_realized_cap are checked against Coin Metrics in `make validate`.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [symbol, metric_date]
   - name: fct_protocol_tvl_daily
     description: >
       Total value locked at the valuation grain (symbol, metric_date); only assets mapped

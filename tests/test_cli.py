@@ -1368,3 +1368,14 @@ def test_utxo_subcommand_parses(monkeypatch):
 
     monkeypatch.setattr(cli, "run_utxo_extract", fake)
     assert cli.main(["utxo", "extract", "--dry-run"]) == 0 and seen == {"dry": True}
+
+
+def test_widen_panel_joins_cointime_onto_btc_only():
+    from cryptoval.cli import _widen_panel
+
+    days = pd.to_datetime(["2020-01-01"])
+    panel = pd.DataFrame({"symbol": ["BTC", "ETH"], "metric_date": [days[0], days[0]]})
+    cointime = pd.DataFrame({"symbol": ["BTC"], "metric_date": days, "liveliness": [0.6]})
+    empty = pd.DataFrame()
+    wide = _widen_panel(panel, empty, empty, empty, cointime).set_index("symbol")
+    assert wide.loc["BTC", "liveliness"] == 0.6 and pd.isna(wide.loc["ETH", "liveliness"])

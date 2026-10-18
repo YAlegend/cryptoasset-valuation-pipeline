@@ -396,6 +396,18 @@ PANEL_REVENUE_COLUMNS = [
     "protocol_count",
 ]
 PANEL_TVL_COLUMNS = ["symbol", "metric_date", "tvl_usd"]
+PANEL_COINTIME_COLUMNS = [
+    "symbol",
+    "metric_date",
+    "liveliness",
+    "active_supply",
+    "utxo_supply",
+    "hodl_rc_0d",
+    "hodl_rc_6m_1y",
+    "sth_supply",
+    "sth_realized_cap",
+    "realized_profit_usd",
+]
 PANEL_ASSET_COLUMNS = [
     "symbol",
     "sector",
@@ -411,6 +423,7 @@ def _widen_panel(
     revenue: pd.DataFrame,
     tvl: pd.DataFrame,
     assets: pd.DataFrame,
+    cointime: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """The asset panel plus the protocol, TVL and dimension columns, LEFT joined.
 
@@ -445,7 +458,10 @@ def _widen_panel(
 
     wide = _join(panel.copy(), revenue, ["symbol", "metric_date"], "protocol revenue")
     wide = _join(wide, tvl, ["symbol", "metric_date"], "protocol TVL")
-    return _join(wide, assets, ["symbol"], "dim_asset")
+    wide = _join(wide, assets, ["symbol"], "dim_asset")
+    if cointime is None:
+        return wide
+    return _join(wide, cointime, ["symbol", "metric_date"], "btc cointime")
 
 
 def _read_panel(settings: Settings) -> pd.DataFrame:
@@ -471,6 +487,7 @@ def _read_panel(settings: Settings) -> pd.DataFrame:
             maybe("fct_protocol_revenue_daily", PANEL_REVENUE_COLUMNS),
             maybe("fct_protocol_tvl_daily", PANEL_TVL_COLUMNS),
             maybe("dim_asset", PANEL_ASSET_COLUMNS),
+            maybe("fct_btc_cointime_daily", PANEL_COINTIME_COLUMNS),
         )
     finally:
         con.close()
