@@ -98,3 +98,14 @@ def test_a_window_that_ends_before_it_starts_is_refused(tmp_path):
     )
     with pytest.raises(ValueError, match="before start"):
         load_vol_config(str(path))
+
+
+def test_a_duplicated_date_is_refused_on_either_calendar():
+    """Final review: on the trading calendar nothing else would catch a duplicate, and a
+    repeated day becomes a silent zero return. 2026-10-18's iCloud conflict copies
+    duplicated every panel row, so this input is not hypothetical."""
+    days = pd.bdate_range("2019-01-01", periods=900)
+    frame = pd.DataFrame({"symbol": "AAPL", "metric_date": days, "price_usd": 100.0})
+    doubled = pd.concat([frame, frame.iloc[[5]]], ignore_index=True)
+    with pytest.raises(Unusable, match="AAPL has 1 duplicated date"):
+        price_series(doubled, "AAPL")

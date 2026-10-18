@@ -28,6 +28,12 @@ def price_series(panel: pd.DataFrame, symbol: str) -> pd.Series:
     values = pd.to_numeric(rows["price_usd"], errors="coerce").astype("float64").to_numpy()
     series = pd.Series(values, index=pd.DatetimeIndex(pd.to_datetime(rows["metric_date"])))
     series = series.sort_index()
+    duplicated = series.index[series.index.duplicated()]
+    if len(duplicated):
+        raise Unusable(
+            f"{symbol} has {len(duplicated)} duplicated date(s), first "
+            f"{duplicated[0]:%Y-%m-%d}; a repeated day would be read as a zero return"
+        )
     series = series[series > 0.0]
     if series.empty:
         raise Unusable(f"{symbol} has no positive price")
