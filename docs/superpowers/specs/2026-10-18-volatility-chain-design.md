@@ -180,8 +180,8 @@ runs it and `make all` runs it after `econ`. **Decision: a new table, not rows i
 
 ## 10. Table shape
 
-`(model_id, symbol, metric, value, n_rows, window, reason, params_hash, panel_vintage_ts)`.
-`symbol` is an asset (`BTC`) or a pair (`BTC|ETH`); `window` is NULL except for per-window rows.
+`(model_id, symbol, metric, value, n_rows, window_name, reason, params_hash, panel_vintage_ts)`.
+`symbol` is an asset (`BTC`) or a pair (`BTC|ETH`); `window_name` is NULL except for per-window rows (`window` is a reserved word in DuckDB's parser).
 `model_id` ∈ {`arch_lm`, `garch`, `egarch`, `exhaustion`, `markov`, `dcc`}. Hypothesis rows use the
 metric `p_value`; `model_id = '*'` holds the hypothesis count. `TEST_COLUMNS` is asserted against the
 mart's select list from the first task, as Plan 4b does.
