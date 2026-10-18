@@ -352,7 +352,7 @@ One row per gap, each with its measurement.
 | §11.4 | A searched lag order | The VAR lag order is AIC's choice up to a cap of 14 days, and **AIC chose the cap on 25 of 56 pairs**, so on those it wanted more lags than it was allowed. ADF's lag is also AIC's choice. Nothing is tuned beyond that. At the cap Johansen rejects 32.5% of null pairs (§4), so a Johansen verdict at 14 lags carries almost no information here. |
 | §11.4 | Pre-tests that gate | ADF/KPSS are reported beside Engle-Granger and never refuse it, so a pair whose market cap is stationary on its own enters the Holm family and can survive it. ICP did, and is withdrawn by the null simulation (§4) rather than by the runner. A refusal rule would shrink the family and move every adjusted p-value; it is not built. |
 | §11.4 | Four testable assets, discarded over short gaps | AVAX and MANA (Metcalfe), MKR and USDC (liquidity) are refused over gaps of 1 to 8 days (§2). A test on the longest contiguous segment would recover them. Not built: the rule is "refuse, never stitch", and choosing a segment is a decision the design did not make. |
-| §11.4 | GARCH, Markov-switching, DCC | §11.4's second chain. It answers a different question, writes a different table and needs `arch`; a later plan. |
+| §11.4 | GARCH, Markov-switching, DCC | §11.4's second chain, now `reports/does-volatility-cluster.md` (`fct_volatility_test`). |
 | §11.5 | Factor models, Fama-MacBeth, decile portfolios | Still blocked on the point-in-time top-N universe that §5 and §11.5 both require and no free source serves. |
 
 Two further limits belong here because they bound the result. **First**, every number is in-sample
