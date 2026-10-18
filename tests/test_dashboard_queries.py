@@ -1,0 +1,89 @@
+import datetime as dt
+import math
+
+import duckdb
+import pytest
+
+from cryptoval.dashboard import queries as q
+from cryptoval.methods.cashflow import three_stage_pv
+from tests.dashboard_fixture import DCF_INPUTS, LAST, PREV, build
+
+
+@pytest.fixture
+def con():
+    con = duckdb.connect()
+    build(con)
+    yield con
+    con.close()
+
+
+def test_freshness_flags_a_stale_panel(con):
+    fresh = q.freshness(con, LAST + dt.timedelta(days=1))
+    assert fresh["panel_through"] == LAST and fresh["coin_age_through"] == LAST
+    assert fresh["panel_lag_days"] == 1 and not fresh["stale"]
+    assert q.freshness(con, LAST + dt.timedelta(days=5))["stale"]
+
+
+def test_football_field_is_the_grid_range_on_each_methods_latest_applicable_date(con):
+    field = q.football_field(con, "BTC").set_index("method_id")
+    assert set(field.index) == {"realized_price", "defi_net_revenue_dcf"}
+    rp, dcf = field.loc["realized_price"], field.loc["defi_net_revenue_dcf"]
+    assert rp["metric_date"] == LAST and rp["low"] == rp["high"] == 60.0 and rp["is_circular"]
+    # the DCF refused on LAST, so its latest APPLICABLE date is PREV, with a two-cell grid
+    assert dcf["metric_date"] == PREV and (dcf["low"], dcf["high"], dcf["mid"]) == (40, 80, 60)
+    assert dcf["n_cells"] == 2 and not dcf["is_circular"]
+
+
+def test_signals_never_enter_the_football_field_or_heatmap(con):
+    assert "slrv" not in set(q.football_field(con, "BTC")["method_id"])
+    assert "slrv" not in set(q.agreement(con)["method_id"])
+
+
+def test_refusals_list_methods_that_never_apply(con):
+    assert q.refusals(con, "BTC").to_dict("records") == [
+        {"method_id": "never_applies", "reason": "nope"}
+    ]
+    assert set(q.refusals(con, "USDC")["method_id"]) == {"never_applies", "realized_price"}
+    assert q.football_field(con, "USDC").empty
+
+
+def test_indicator_series_reads_panel_coin_age_and_signal_diagnostics(con):
+    assert (q.indicator_series(con, "mvrv")["value"] == 2.0).all()
+    assert (q.indicator_series(con, "liveliness")["value"] == 0.6).all()
+    slrv = q.indicator_series(con, "slrv")
+    assert slrv.to_dict("records") == [{"metric_date": LAST, "value": 0.05}]
+    assert q.indicator_series(con, "puell_multiple")["value"].tolist() == pytest.approx([1.0] * 36)
+    with pytest.raises(ValueError, match="unknown indicator"):
+        q.indicator_series(con, "astrology")
+
+
+def test_mayer_multiple_is_price_over_its_200_day_mean(con):
+    mayer = q.indicator_series(con, "mayer_multiple")
+    assert len(mayer) == 400 - 199
+    assert mayer["value"].iloc[-1] == pytest.approx(499 / 399.5)
+
+
+def test_agreement_is_log10_of_median_fair_value_over_that_days_price(con):
+    got = q.agreement(con).set_index(["symbol", "method_id"])["log_ratio"]
+    assert got[("BTC", "realized_price")] == pytest.approx(math.log10(60 / 499))
+    assert got[("BTC", "defi_net_revenue_dcf")] == pytest.approx(math.log10(60 / 498))
+    assert len(got) == 2
+
+
+def test_dcf_inputs_come_from_the_latest_applicable_row(con):
+    [row] = q.dcf_inputs(con).to_dict("records")
+    assert row["symbol"] == "BTC" and row["metric_date"] == PREV
+    assert row["annual_cash_flow_usd"] == 1e6 and row["supply"] == 1e4
+    assert row["growth"] == [0.1, 0.05, 0.02] and row["terminal_multiple"] == 10.0
+
+
+def test_dcf_value_matches_three_stage_pv_per_token():
+    d = DCF_INPUTS
+    pv, share = three_stage_pv(1e6, (0.1, 0.05, 0.02), 0.2, (3, 3, 4), 10.0)
+    got = q.dcf_value(1e6, 1e4, d["growth"], 0.2, d["stage_years"], 10.0)
+    assert got == pytest.approx((pv / 1e4, share))
+
+
+def test_dcf_value_refuses_an_inverted_gordon():
+    with pytest.raises(ValueError, match="Gordon"):
+        q.dcf_value(1e6, 1e4, [0.1, 0.05, 0.03], 0.03, [3, 3, 4], None)
