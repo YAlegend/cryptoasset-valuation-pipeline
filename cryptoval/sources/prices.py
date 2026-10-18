@@ -55,7 +55,9 @@ class CoinGeckoSource:
     name = "coingecko"
     contract_path = "config/contracts/coingecko_market_chart.yml"
 
-    def __init__(self, max_retries: int = 5, sleep_between_assets_s: float = 6.0) -> None:
+    # 7 attempts from 2 s back off 2+4+...+64 = 126 s: past the free tier's per-minute
+    # window. At 5 the backoff totalled 30 s and a 429 outlived it (2026-10-18, twice).
+    def __init__(self, max_retries: int = 7, sleep_between_assets_s: float = 6.0) -> None:
         self.max_retries = max_retries
         self.sleep_between_assets_s = sleep_between_assets_s
 
