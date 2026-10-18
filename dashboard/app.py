@@ -59,7 +59,8 @@ def _banner(db: str) -> None:
         f"BTC coin-age data through **{coin}**."
     )
     if fresh["stale"]:
-        st.warning(f"{text} The panel is {fresh['panel_lag_days']} days old: run `make all`.")
+        age = "empty" if fresh["panel_lag_days"] is None else f"{fresh['panel_lag_days']} days old"
+        st.warning(f"{text} The panel is {age}: run `make all`.")
     else:
         st.caption(text)
 
@@ -180,20 +181,46 @@ def _dcf(db: str) -> None:
     keys = rows["symbol"] + " / " + rows["method_id"]
     choice = st.selectbox("Asset and DCF", keys.tolist())
     row = rows[keys == choice].iloc[0]
+    clamped: list[str] = []
+
+    def start(label: str, value: float, lo: float, hi: float) -> float:
+        # A stored setting outside the slider's range would make st.slider raise.
+        if not lo <= value <= hi:
+            clamped.append(f"{label} {value:g}")
+        return min(max(value, lo), hi)
+
     growth = list(row["growth"])
     cols = st.columns(2)
-    discount = cols[0].slider("Discount rate", 0.01, 0.40, float(row["discount_rate"]), 0.01)
+    discount = cols[0].slider(
+        "Discount rate",
+        0.01,
+        0.40,
+        start("discount rate", float(row["discount_rate"]), 0.01, 0.40),
+        0.01,
+    )
     terminal = cols[1].slider(
         "Terminal multiple (0 = Gordon growth)",
         0.0,
         40.0,
-        float(row["terminal_multiple"] or 0.0),
+        start("terminal multiple", float(row["terminal_multiple"] or 0.0), 0.0, 40.0),
         1.0,
     )
     g = st.columns(3)
     growth = [
-        g[i].slider(f"Stage {i + 1} growth", -0.20, 0.60, float(growth[i]), 0.01) for i in range(3)
+        g[i].slider(
+            f"Stage {i + 1} growth",
+            -0.20,
+            0.60,
+            start(f"stage {i + 1} growth", float(growth[i]), -0.20, 0.60),
+            0.01,
+        )
+        for i in range(3)
     ]
+    if clamped:
+        st.caption(
+            f"The stored {', '.join(clamped)} is outside the slider range, so the slider starts "
+            "at its nearest end and these numbers will not match the stored estimate."
+        )
     price = _read(db, "latest_price", row["symbol"])
     try:
         value, share = q.dcf_value(

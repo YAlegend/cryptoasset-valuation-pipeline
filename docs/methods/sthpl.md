@@ -16,7 +16,7 @@ measured density in its reason, rather than a number fitted on too little data.
 
 ## Parameters
 
-- `sth_days` = `155`
+- (none)
 
 ## Failure modes
 
@@ -24,4 +24,4 @@ measured density in its reason, rather than a number fitted on too little data.
 
 ## Assumptions
 
-- A coin's age is days since the output was created; 155 days separates short- from long-term holders.
+- A coin's age is days since the output was created; 155 days separates short- from long-term holders. The cutoff is fixed in cryptoval/utxo/derive.py (STH_DAYS), where the cohort is built, not a parameter of this ratio.

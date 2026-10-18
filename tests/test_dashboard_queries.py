@@ -87,3 +87,9 @@ def test_dcf_value_matches_three_stage_pv_per_token():
 def test_dcf_value_refuses_an_inverted_gordon():
     with pytest.raises(ValueError, match="Gordon"):
         q.dcf_value(1e6, 1e4, [0.1, 0.05, 0.03], 0.03, [3, 3, 4], None)
+
+
+def test_freshness_on_an_empty_panel_is_stale_not_a_crash(con):
+    con.execute("delete from fct_asset_metrics_daily")
+    fresh = q.freshness(con, LAST)
+    assert fresh["panel_through"] is None and fresh["stale"]

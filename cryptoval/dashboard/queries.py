@@ -52,13 +52,13 @@ def freshness(con, today: dt.date) -> dict:
     except Exception:  # the coin-age mart is optional until Plan 3b's extraction has run
         coin = None
     through = _date(through)
-    lag = (today - through).days
+    lag = None if through is None else (today - through).days  # None: a built but empty panel
     return {
         "panel_through": through,
         "coin_age_through": _date(coin),
         "panel_vintage": vintage,
         "panel_lag_days": lag,
-        "stale": lag > STALE_DAYS,
+        "stale": lag is None or lag > STALE_DAYS,
     }
 
 

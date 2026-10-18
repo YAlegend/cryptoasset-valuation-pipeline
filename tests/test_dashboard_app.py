@@ -54,3 +54,17 @@ def test_dcf_tab_prices_the_row_and_refuses_an_inverted_gordon(data_root):
     at.slider[0].set_value(0.02)  # discount at stage-3 growth
     at.run()
     assert any("Gordon" in e.value for e in at.error)
+
+
+def test_a_stored_dcf_setting_outside_the_slider_range_is_clamped(data_root):
+    con = duckdb.connect(str(data_root / "cryptoval.duckdb"))
+    con.execute(
+        "update fct_valuation_estimate set inputs_used = replace(inputs_used, "
+        "'\"discount_rate\": 0.2', '\"discount_rate\": 0.55') "
+        "where method_id = 'defi_net_revenue_dcf'"
+    )
+    con.close()
+    at = AppTest.from_file(APP, default_timeout=60).run()
+    assert not at.exception
+    assert at.slider[0].value == 0.40
+    assert any("outside the slider" in c.value for c in at.caption)
