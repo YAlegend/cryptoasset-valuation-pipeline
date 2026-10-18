@@ -71,6 +71,7 @@ class Settings:
     data_root: str = "./data"
     trailing_refetch_days: int = 30
     bigquery_monthly_byte_budget: int = 900_000_000_000
+    bigquery_project: str = ""
     request_timeout_s: int = 30
     max_retries: int = 5
 
