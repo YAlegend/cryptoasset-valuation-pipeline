@@ -1104,7 +1104,7 @@ def test_a_garch_that_fails_to_converge_is_a_refusal_and_the_run_continues(monke
     real = runner.fit_garch
 
     def flaky(returns):
-        if len(returns) == 1199 and returns.iloc[0] == _first_eth_return():
+        if len(returns) == 1199 and abs(returns.iloc[0] - _first_eth_return()) < 1e-9:
             raise Unusable("garch: optimizer did not converge (flag 4: test)")
         return real(returns)
 
@@ -1117,7 +1117,8 @@ def test_a_garch_that_fails_to_converge_is_a_refusal_and_the_run_continues(monke
 
 
 def _first_eth_return():
-    prices = _crypto(("ETH",))["price_usd"].to_numpy()
+    crypto = _crypto(("BTC", "ETH"))
+    prices = crypto[crypto["symbol"] == "ETH"]["price_usd"].to_numpy()
     return 100.0 * np.log(prices[1] / prices[0])
 
 
