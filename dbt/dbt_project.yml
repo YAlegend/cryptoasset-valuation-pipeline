@@ -7,7 +7,7 @@ target-path: "target"
 clean-targets: ["target", "dbt_packages"]
 
 vars:
-  data_root: "../data"
+  data_root: "{{ env_var('CRYPTOVAL_DATA_ROOT', '../data') }}"
   bitcoin_genesis: "2009-01-03"
 
 models:

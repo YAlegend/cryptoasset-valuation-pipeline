@@ -133,3 +133,25 @@ def test_no_os_cruft_is_tracked():
     ).splitlines()
     cruft = [p for p in tracked if pathlib.Path(p).name in {".DS_Store", "Thumbs.db"}]
     assert cruft == [], f"OS metadata files are tracked: {cruft}"
+
+
+def test_readme_carries_the_disclaimer_and_the_reproduce_command():
+    readme = (REPO / "README.md").read_text(encoding="utf-8")
+    assert "not investment advice" in readme  # spec 12: the report AND the dashboard carry it
+    for command in ("make setup", "make all", "make dashboard", "make utxo"):
+        assert command in readme
+
+
+def test_dockerfile_installs_cpu_torch_exactly_as_ci_does():
+    ci = (REPO / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    [torch] = [line.strip() for line in ci.splitlines() if "pip install torch" in line]
+    dockerfile = (REPO / "Dockerfile").read_text(encoding="utf-8")
+    assert torch.removeprefix("pip install ") in dockerfile
+
+
+def test_dbt_reads_the_same_data_root_as_python():
+    # Python honours CRYPTOVAL_DATA_ROOT; a dbt that hard-coded ../data would build the marts
+    # in one place while estimate and the dashboard read another (the Docker /data volume).
+    expected = "env_var('CRYPTOVAL_DATA_ROOT', '../data')"
+    assert expected in (REPO / "dbt" / "profiles.yml").read_text(encoding="utf-8")
+    assert expected in (REPO / "dbt" / "dbt_project.yml").read_text(encoding="utf-8")
