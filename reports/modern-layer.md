@@ -42,6 +42,9 @@ distribution. It needs the BigQuery extraction that Plan 3b owns. The §10.5
 market-cap-to-net-assets multiple is absent for a different reason — no free source carries a
 protocol balance sheet at all. Both appear in §6 below with the measurement that decided them.
 
+*Update, 2026-10-18:* Plan 3b's BigQuery extraction has since landed, and Family E(b) is live.
+See `reports/what-do-coin-ages-say.md`.
+
 Coverage, applicable rows per method, over the whole panel:
 
 | Family | Method | Applicable rows | Symbols | Param sets |
