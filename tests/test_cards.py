@@ -54,8 +54,8 @@ def test_every_registered_method_has_a_config_and_vice_versa():
 def test_every_method_has_a_card_on_disk_and_the_registry_holds_all_41():
     """`make cards` must have been re-run: a config with no card is an unpublished method.
 
-    41 = 14 from Plan 2 + 21 from Plan 3 + 6 from Plan 3b (Family E(b)). A count that drifts without a plan entry is a
-    method someone added without a card or a config.
+    41 = 14 from Plan 2 + 21 from Plan 3 + 6 from Plan 3b (Family E(b)). A count that drifts
+    without a plan entry is a method someone added without a card or a config.
     """
     import pathlib
 
