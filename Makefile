@@ -1,7 +1,7 @@
 PY := .venv/bin/python
 PIP := .venv/bin/pip
 
-.PHONY: setup test test-integration lint fmt ingest backfill validate reconcile seed cards estimate score econ vol dbt all
+.PHONY: setup test test-integration lint fmt ingest backfill validate reconcile seed cards estimate score econ vol utxo utxo-derive dbt all
 
 setup:
 	python3 -m venv .venv
@@ -52,6 +52,13 @@ econ:
 vol:
 	$(PY) -m cryptoval.cli vol
 
+# Spends BigQuery sandbox budget (spec 6.3): run on purpose, monthly, never from `all`.
+utxo:
+	$(PY) -m cryptoval.cli utxo extract
+
+utxo-derive:
+	$(PY) -m cryptoval.cli utxo derive
+
 dbt:
 	# full-refresh: a seed CSV that gained a column fails to load otherwise
 	cd dbt && ../.venv/bin/dbt seed --full-refresh --profiles-dir . && ../.venv/bin/dbt build --profiles-dir .
@@ -60,6 +67,7 @@ dbt:
 # `all: ... dbt estimate dbt ...` skipped the second dbt and the marts never saw the gold tables.
 all:
 	$(MAKE) lint test ingest
+	$(MAKE) utxo-derive
 	$(MAKE) dbt
 	$(MAKE) estimate
 	$(MAKE) dbt

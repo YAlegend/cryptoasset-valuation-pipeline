@@ -13,9 +13,10 @@ import pandas as pd
 
 import cryptoval.methods  # noqa: F401 -- import registers every method family
 import cryptoval.scoring  # noqa: F401 -- import registers every model family
+from cryptoval.budget import ByteBudgetGate
 from cryptoval.config import Asset, Settings, load_config
 from cryptoval.contracts.checks import check_volume_anomaly, run_checks
-from cryptoval.contracts.identities import run_identity_checks
+from cryptoval.contracts.identities import check_cointime_complement, run_identity_checks
 from cryptoval.contracts.loader import Contract, load_contract
 from cryptoval.econometrics.registry import PAIRS
 from cryptoval.econometrics.runner import run_pairs
@@ -37,6 +38,14 @@ from cryptoval.sources.defillama import (
     DefiLlamaTvlSource,
 )
 from cryptoval.sources.prices import CoinGeckoSource, CoinGeckoSupplySource, EquitySource
+from cryptoval.utxo.derive import derive, empty_cointime, vendor_mismatches
+from cryptoval.utxo.extract import (
+    assert_contiguous,
+    completed_runs,
+    extract,
+    read_history,
+    read_runs,
+)
 from cryptoval.volatility.runner import run_volatility
 from cryptoval.volatility.settings import load_vol_config
 
@@ -369,6 +378,7 @@ def run_validate(settings: Settings, assets: list[Asset]) -> Validation:
             warnings.extend(
                 _volume_anomaly_warnings(name, table, unscoped, contract, unmapped=True)
             )
+    failures.extend(_cointime_failures(settings))
     return Validation(failures, warnings)
 
 
@@ -695,6 +705,82 @@ def run_vol(settings: Settings, assets: list[Asset]) -> dict[str, dict]:
     return report
 
 
+def _btc_history(resolver) -> pd.DataFrame:
+    """BTC's full Coin Metrics history as (metric_date, price_usd, supply, realized_cap)."""
+    raw = read_history(resolver)
+    if raw.empty:
+        return pd.DataFrame(columns=["metric_date", "price_usd", "supply", "realized_cap"])
+    btc = raw[raw["asset"] == "btc"]
+    return pd.DataFrame(
+        {
+            "metric_date": pd.to_datetime(btc["metric_date"], utc=True).dt.date,
+            "price_usd": pd.to_numeric(btc["PriceUSD"], errors="coerce"),
+            "supply": pd.to_numeric(btc["SplyCur"], errors="coerce"),
+            "realized_cap": pd.to_numeric(btc["realized_cap"], errors="coerce"),
+        }
+    )
+
+
+def run_utxo_extract(settings: Settings, assets: list[Asset], dry_run: bool) -> dict:
+    """One staged BigQuery extraction (spec 6.3). Spends budget; never part of `make all`."""
+    from cryptoval.utxo.bigquery import BigQueryClient
+
+    resolver = settings.resolver
+    manifest = RunManifest(resolver)
+    btc = [a for a in assets if a.symbol == "BTC"]
+
+    def history(start: dt.date, end: dt.date) -> pd.DataFrame:
+        source = CoinMetricsSource(max_retries=settings.max_retries)
+        with httpx.Client(timeout=settings.request_timeout_s) as client:
+            return source.fetch(start, end, btc, client).frame
+
+    now = dt.datetime.now(dt.UTC)
+    return extract(
+        resolver,
+        BigQueryClient(settings.bigquery_project),
+        ByteBudgetGate(manifest, settings.bigquery_monthly_byte_budget),
+        manifest,
+        now.date(),
+        now,
+        history,
+        dry_run=dry_run,
+    )
+
+
+def run_utxo_derive(settings: Settings, assets: list[Asset]) -> dict:
+    """Silver btc_cointime_daily from every complete run; empty until the backfill is whole."""
+    resolver = settings.resolver
+    runs = completed_runs(resolver)
+    if not runs:
+        write_silver(resolver, "btc_cointime_daily", empty_cointime())
+        return {"status": "awaiting_backfill"}
+    end = assert_contiguous(runs)
+    frames = read_runs(resolver, runs)
+    prices = _btc_history(resolver).set_index("metric_date")["price_usd"]
+    table = derive(
+        frames["btc_utxo_spent"], frames["btc_utxo_created"], frames["btc_blocks"], prices, end
+    )
+    write_silver(resolver, "btc_cointime_daily", table)
+    last = table.iloc[-1]
+    return {
+        "status": "derived",
+        "rows": len(table),
+        "through": str(end),
+        "liveliness": round(float(last["liveliness"]), 4),
+        "utxo_supply": round(float(last["utxo_supply"]), 2),
+    }
+
+
+def _cointime_failures(settings: Settings) -> list[str]:
+    cointime = _read_silver(settings, "btc_cointime_daily")
+    if cointime.empty:
+        return []  # awaiting backfill: the family refuses, so there is nothing to check
+    result = check_cointime_complement(cointime)
+    out = [] if result.passed else [f"btc_cointime_daily/{result.name}: {result.detail}"]
+    cointime = cointime.assign(metric_date=pd.to_datetime(cointime["metric_date"]).dt.date)
+    return out + vendor_mismatches(cointime, _btc_history(settings.resolver))
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="cryptoval")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -719,6 +805,10 @@ def main(argv: list[str] | None = None) -> int:
     ec.add_argument("--pairs", help="comma-separated pair ids; default every registered pair")
 
     sub.add_parser("vol")
+
+    ux = sub.add_parser("utxo")
+    ux.add_argument("action", choices=["extract", "derive"])
+    ux.add_argument("--dry-run", action="store_true", help="price the next range, run nothing")
 
     args = parser.parse_args(argv)
     settings, assets = load_config()
@@ -762,6 +852,13 @@ def main(argv: list[str] | None = None) -> int:
         for pair_id, outcome in sorted(run_econ(settings, assets, ids).items()):
             print(pair_id, outcome)
         # No cointegration found is the expected result, not a failed run.
+        return 0
+
+    if args.command == "utxo":
+        if args.action == "extract":
+            print(run_utxo_extract(settings, assets, args.dry_run))
+        else:
+            print(run_utxo_derive(settings, assets))
         return 0
 
     if args.command == "vol":

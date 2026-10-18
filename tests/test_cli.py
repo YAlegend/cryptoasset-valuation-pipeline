@@ -1301,3 +1301,70 @@ def test_vol_writes_the_documented_columns_to_gold(tmp_path, monkeypatch):
     assert list(written.columns) == VOL_COLUMNS
     assert (written["metric"] == "hypotheses_tested").any()
     assert report["garch"]["rows"] > 0
+
+
+def test_utxo_derive_without_a_backfill_writes_an_empty_table(tmp_path):
+    from cryptoval.cli import run_utxo_derive
+    from cryptoval.config import Settings
+    from cryptoval.utxo.derive import COINTIME_COLUMNS
+
+    settings = Settings(data_root=str(tmp_path))
+    report = run_utxo_derive(settings, [])
+    assert report["status"] == "awaiting_backfill"
+    table = pd.read_parquet(tmp_path / "silver" / "btc_cointime_daily" / "part-0.parquet")
+    assert table.empty and list(table.columns) == COINTIME_COLUMNS
+
+
+def test_cointime_failures_flag_the_complement_and_vendor_breaches(tmp_path, monkeypatch):
+    import datetime as dt
+
+    import cryptoval.cli as cli
+    from cryptoval.config import Settings
+    from cryptoval.io.bronze import write_silver
+
+    settings = Settings(data_root=str(tmp_path))
+    day = dt.date(2013, 1, 1)
+    ours = pd.DataFrame(
+        {
+            "metric_date": [day],
+            "liveliness": [0.4],
+            "vaultedness": [0.5],
+            "utxo_supply": [100.0],
+            "utxo_realized_cap": [10.0],
+        }
+    )
+    write_silver(settings.resolver, "btc_cointime_daily", ours)
+    vendor = pd.DataFrame(
+        {
+            "asset": ["btc"],
+            "metric_date": [pd.Timestamp(day, tz="UTC")],
+            "PriceUSD": [1.0],
+            "SplyCur": [100.0],
+            "realized_cap": [20.0],
+        }
+    )
+    monkeypatch.setattr(cli, "read_history", lambda resolver: vendor)
+    found = cli._cointime_failures(settings)
+    assert any("identity_cointime" in f for f in found)
+    assert any("utxo_realized_cap" in f for f in found)
+    assert not any("utxo_supply" in f for f in found)
+
+
+def test_cointime_failures_are_silent_before_any_backfill(tmp_path):
+    from cryptoval.cli import _cointime_failures
+    from cryptoval.config import Settings
+
+    assert _cointime_failures(Settings(data_root=str(tmp_path))) == []
+
+
+def test_utxo_subcommand_parses(monkeypatch):
+    import cryptoval.cli as cli
+
+    seen = {}
+
+    def fake(settings, assets, dry_run):
+        seen["dry"] = dry_run
+        return {"status": "dry_run"}
+
+    monkeypatch.setattr(cli, "run_utxo_extract", fake)
+    assert cli.main(["utxo", "extract", "--dry-run"]) == 0 and seen == {"dry": True}
