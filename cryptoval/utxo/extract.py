@@ -120,21 +120,23 @@ def extract(
     gate.guard(total, now)
 
     run_id = str(uuid.uuid4())
+    # Free (HTTP, not BigQuery): realized-cap weighting needs prices from 2010, and the panel
+    # starts in 2015. Fetched FIRST: once the three queries land the range reads as done and
+    # is never revisited, so a history fetch failing after them could never be retried.
+    history = history_fetch(GENESIS, rng.end)
+    write_bronze(resolver, HISTORY_SOURCE, rng.end, history, {"end": rng.end}, run_id)
+
     for source, sql in sqls.items():
         params = {"range_start": rng.start, "range_end": rng.end, "sql_hash": stable_hash(sql)}
         record = manifest.start(source, params, started_at=now)
-        billed = 0
         try:
             frame, billed = client.run(sql, max_bytes=gate.remaining(now))
             frame = frame.assign(range_start=rng.start, range_end=rng.end)
             write_bronze(resolver, source, rng.end, frame, params, run_id)
         except Exception as exc:
-            manifest.finish(record, 0, 0, "failed", bytes_scanned=billed, error=str(exc))
+            # Charged the dry run, not 0: a download can fail after BigQuery has billed, and
+            # a gate that forgets those bytes lets the retry spend them twice.
+            manifest.finish(record, 0, 0, "failed", bytes_scanned=estimates[source], error=str(exc))
             raise
         manifest.finish(record, len(frame), len(frame), "success", bytes_scanned=billed)
-
-    # Free (HTTP, not BigQuery): realized-cap weighting needs prices from 2010, and the panel
-    # starts in 2015.
-    history = history_fetch(GENESIS, rng.end)
-    write_bronze(resolver, HISTORY_SOURCE, rng.end, history, {"end": rng.end}, run_id)
     return {"status": "extracted", "run_id": run_id, **report}

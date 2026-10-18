@@ -151,3 +151,23 @@ def test_a_gap_or_a_late_start_is_not_contiguous():
         assert_contiguous(runs)
     with pytest.raises(ValueError, match="genesis"):
         assert_contiguous([(Range(dt.date(2009, 1, 4), dt.date(2009, 1, 8)), "a")])
+
+
+def test_a_failed_query_is_charged_its_dry_run_estimate(tmp_path):
+    # the download can fail after BigQuery has billed; the gate must not forget those bytes
+    with pytest.raises(RuntimeError, match="boom"):
+        _run(tmp_path, FakeClient(fail_on="outputs"))
+    ledger = RunManifest(PathResolver(str(tmp_path))).read()
+    assert ledger["bytes_scanned"].tolist() == [100, 100]
+
+
+def test_a_failed_history_fetch_spends_nothing_and_leaves_the_range_open(tmp_path):
+    def broken(start, end):
+        raise RuntimeError("coin metrics down")
+
+    resolver = PathResolver(str(tmp_path))
+    manifest = RunManifest(resolver)
+    client = FakeClient()
+    with pytest.raises(RuntimeError, match="coin metrics down"):
+        extract(resolver, client, ByteBudgetGate(manifest, 10_000), manifest, TODAY, NOW, broken)
+    assert client.ran == [] and completed_runs(resolver) == []
