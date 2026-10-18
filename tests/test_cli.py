@@ -1268,3 +1268,36 @@ def test_econ_writes_the_documented_columns_to_gold(tmp_path, monkeypatch):
 def test_econ_refuses_an_unknown_pair_at_the_cli(capsys):
     assert cli.main(["econ", "--pairs", "not_a_pair"]) == 2
     assert "unknown pair" in capsys.readouterr().err
+
+
+def test_vol_writes_the_documented_columns_to_gold(tmp_path, monkeypatch):
+    from cryptoval.volatility.runner import TEST_COLUMNS as VOL_COLUMNS
+
+    rng = np.random.default_rng(7)
+    days = pd.date_range("2019-01-01", periods=1000, freq="D")
+    crypto = pd.DataFrame(
+        {
+            "symbol": "BTC",
+            "metric_date": days,
+            "price_usd": 100.0 * np.exp(np.cumsum(rng.normal(0.0, 0.03, len(days)))),
+            "panel_vintage_ts": pd.Timestamp("2026-10-18 08:30", tz="UTC"),
+        }
+    )
+    trading = pd.bdate_range("2019-01-01", "2021-12-31")
+    traditional = pd.DataFrame(
+        {
+            "symbol": "AAPL",
+            "metric_date": trading,
+            "price_usd": 100.0 * np.exp(np.cumsum(rng.normal(0.0, 0.02, len(trading)))),
+        }
+    )
+    settings = Settings(data_root=str(tmp_path))
+    monkeypatch.setattr(cli, "_read_vol_inputs", lambda _settings: (crypto, traditional))
+    report = cli.run_vol(settings, [])
+
+    written = pd.read_parquet(
+        pathlib.Path(settings.resolver.table("gold", "volatility_test")) / "part-0.parquet"
+    )
+    assert list(written.columns) == VOL_COLUMNS
+    assert (written["metric"] == "hypotheses_tested").any()
+    assert report["garch"]["rows"] > 0

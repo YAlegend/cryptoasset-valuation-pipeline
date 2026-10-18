@@ -354,3 +354,20 @@ models:
           after editing a pair's YAML writes rows a reader can tell apart from the old ones --
           the provenance fct_model_score lacks.
         tests: [not_null]
+  - name: fct_volatility_test
+    description: >
+      The volatility chain (GARCH/EGARCH, Markov-switching, DCC) at grain (model_id,
+      symbol, metric, window), spec 11.4. Full sample and therefore descriptive. symbol is
+      an asset or an 'A|B' pair; window_name is NULL except on per-window rows. model_id = '*'
+      holds the hypothesis count over every 'p_value' row.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [model_id, symbol, metric, window_name]
+    columns:
+      - name: model_id
+        tests: [not_null]
+      - name: metric
+        tests: [not_null]
+      - name: params_hash
+        tests: [not_null]

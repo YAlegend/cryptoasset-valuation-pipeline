@@ -10,6 +10,7 @@ import re
 
 from cryptoval.econometrics.runner import TEST_COLUMNS
 from cryptoval.scoring.runner import SCORE_COLUMNS
+from cryptoval.volatility.runner import TEST_COLUMNS as VOL_COLUMNS
 
 
 def _selected_columns(sql_path: str) -> list[str]:
@@ -32,3 +33,7 @@ def test_the_score_mart_selects_exactly_score_columns():
 
 def test_the_econometrics_mart_selects_exactly_test_columns():
     assert _selected_columns("dbt/models/marts/fct_econometric_test.sql") == TEST_COLUMNS
+
+
+def test_the_volatility_mart_selects_exactly_test_columns():
+    assert _selected_columns("dbt/models/marts/fct_volatility_test.sql") == VOL_COLUMNS

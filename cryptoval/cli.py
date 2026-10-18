@@ -37,6 +37,8 @@ from cryptoval.sources.defillama import (
     DefiLlamaTvlSource,
 )
 from cryptoval.sources.prices import CoinGeckoSource, CoinGeckoSupplySource, EquitySource
+from cryptoval.volatility.runner import run_volatility
+from cryptoval.volatility.settings import load_vol_config
 
 SOURCES = {
     "coinmetrics": CoinMetricsSource(),
@@ -655,6 +657,44 @@ def run_econ(
     return report
 
 
+def _read_vol_inputs(settings: Settings) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Crypto prices and traditional prices, each (symbol, metric_date, price_usd).
+    Separate frames: a shared date spine would manufacture weekend nulls (spec 8.1)."""
+    import duckdb
+
+    con = duckdb.connect(str(pathlib.Path(settings.data_root) / "cryptoval.duckdb"), read_only=True)
+    try:
+        crypto = con.execute(
+            "select symbol, metric_date, price_usd, panel_vintage_ts from fct_asset_metrics_daily"
+        ).fetchdf()
+        traditional = con.execute(
+            "select symbol, metric_date, price_usd from fct_equity_prices_daily"
+        ).fetchdf()
+        return crypto, traditional
+    finally:
+        con.close()
+
+
+def run_vol(settings: Settings, assets: list[Asset]) -> dict[str, dict]:
+    """The volatility chain over every asset and pair, full sample, written to gold."""
+    crypto, traditional = _read_vol_inputs(settings)
+    stablecoins = frozenset(a.symbol for a in assets if a.is_stablecoin)
+    vintage = crypto["panel_vintage_ts"].max() if "panel_vintage_ts" in crypto.columns else None
+    table = run_volatility(crypto, traditional, load_vol_config(), stablecoins, vintage)
+    write_gold(settings.resolver, "volatility_test", table)
+
+    report: dict[str, dict] = {}
+    for model_id, group in table[table["model_id"] != "*"].groupby("model_id"):
+        holm = group[(group["metric"] == "p_value_holm") & (group["value"] < 0.05)]
+        report[str(model_id)] = {
+            "rows": int(len(group)),
+            "refusals": int((group["metric"] == "refused").sum()),
+            "symbols": int(group["symbol"].nunique()),
+            "significant_after_holm": int(len(holm)),
+        }
+    return report
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="cryptoval")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -677,6 +717,8 @@ def main(argv: list[str] | None = None) -> int:
 
     ec = sub.add_parser("econ")
     ec.add_argument("--pairs", help="comma-separated pair ids; default every registered pair")
+
+    sub.add_parser("vol")
 
     args = parser.parse_args(argv)
     settings, assets = load_config()
@@ -720,6 +762,12 @@ def main(argv: list[str] | None = None) -> int:
         for pair_id, outcome in sorted(run_econ(settings, assets, ids).items()):
             print(pair_id, outcome)
         # No cointegration found is the expected result, not a failed run.
+        return 0
+
+    if args.command == "vol":
+        for model_id, outcome in sorted(run_vol(settings, assets).items()):
+            print(model_id, outcome)
+        # No clustering or no time-varying correlation is a result, not a failed run.
         return 0
 
     if args.command == "estimate":
