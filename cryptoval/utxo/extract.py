@@ -91,9 +91,7 @@ def read_runs(resolver: PathResolver, runs: list[tuple[Range, str]]) -> dict[str
 
 def read_history(resolver: PathResolver) -> pd.DataFrame:
     """The newest BTC Coin Metrics history, or an empty frame."""
-    parts = sorted(
-        _partitions(resolver, HISTORY_SOURCE).values(), key=lambda p: p.stat().st_mtime
-    )
+    parts = sorted(_partitions(resolver, HISTORY_SOURCE).values(), key=lambda p: p.stat().st_mtime)
     return pd.read_parquet(parts[-1]) if parts else pd.DataFrame()
 
 
