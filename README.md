@@ -31,7 +31,7 @@ Python 3.14 and `make`:
 ```bash
 make setup                      # .venv, dependencies, the package
 ln -s ~/cryptoval-data data     # or: export CRYPTOVAL_DATA_ROOT=/absolute/path/to/data
-make all                        # lint, test, ingest, dbt, estimate, score, econ, vol, validate (~45 min)
+make all                        # lint, test, ingest, dbt, estimate, score, econ, vol, factors, validate (~45 min)
 make dashboard                  # http://localhost:8501
 ```
 
@@ -75,6 +75,7 @@ docker run --rm -p 8501:8501 -v ~/cryptoval-data:/data cryptoval make dashboard
 | `reports/does-price-anchor-to-fundamentals.md` | Is price cointegrated with its fundamentals |
 | `reports/does-volatility-cluster.md` | GARCH, Markov regimes and DCC correlations |
 | `reports/what-do-coin-ages-say.md` | Cointime, HODL waves, SLRV, RPV, STHPL |
+| `reports/do-valuation-signals-earn-returns.md` | Decile sorts, LTW factors, Fama-MacBeth across 92 assets |
 
 ## Layout
 

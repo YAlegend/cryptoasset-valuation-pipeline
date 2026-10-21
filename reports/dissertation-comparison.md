@@ -53,6 +53,7 @@ survive a correct protocol?
 | Tables 3-10: crypto correlations by window | **BTC-ETH reproduces** within 0.06 in every window. **Crypto-equity does not:** BTC's equity correlations are over twice the dissertation's ceiling. Correlation is time-varying on 11 of 20 crypto pairs | §6 |
 | §8.4.3: assets "part company" at a bull-market peak | **Right in direction, not unusual.** Lower peak correlation on 16 of 19 pairs, but the median pair sits at the 35th percentile of its own history | §6 |
 | §5.5, §6.1, §6.2: SLRV, RPV and STHPL thresholds mark tops and bottoms | **SLRV and STHPL yes, RPV no.** Both peak on 2017-12-07 and sit in their oversold zones through 2018 and 2022. RPV never reaches 2% (maximum 1.68%) | §7; `what-do-coin-ages-say.md` |
+| (§8.4 could not ask) Does a valuation signal earn returns across assets? | **No.** MVRV and active addresses over market cap earn no decile spread, no alpha against the Liu-Tsyvinski-Wu factors and no Fama-MacBeth premium (Holm p 1.00 on all six). Only value-weighted momentum survives, at +1.27% a week, on a Coin Metrics universe with a declared selection bias | `do-valuation-signals-earn-returns.md` |
 | Ch. 1: cryptoassets have neither cash flows nor earnings | **No longer true for a large part of the market.** Protocol revenue supports DCFs for 9 assets, and multiples on fees, sales and TVL | `modern-layer.md` |
 
 ## 3. The dissertation's valuation formulas on today's data
@@ -205,6 +206,8 @@ Its empirical chapters fare as follows:
 - **The volatility claim** is half right.
 - **The correlation tables** reproduce for BTC-ETH and fail for crypto-equity.
 - **The holder-behaviour signals** behave as described for SLRV and STHPL, and not for RPV.
+- **Across assets,** neither MVRV nor active addresses per dollar ranks coins by their next-week
+  return; momentum is the one factor that does.
 
 What the dissertation could not have known, and this project adds, is two things. Cash-flow
 valuation now exists for a real part of the market. And cointegration shows that where price and a
@@ -219,7 +222,7 @@ forecasting result that every method on the shelf failed to beat.
 ### Reproducing this chapter
 
 ```bash
-make all          # ingest, dbt, estimate, score, econ, vol, validate (~45 min)
+make all          # ingest, dbt, estimate, score, econ, vol, factors, validate (~45 min)
 make utxo         # monthly, by hand: the BigQuery coin-age extraction (README)
 make dashboard    # the football field and heatmap behind section 3
 ```

@@ -209,7 +209,7 @@ it is conservative here.
 | §11.4 | A regime-count test | Markov-switching's LR test is non-standard; none reported. |
 | §11.4 | Structural breaks | Persistence at 1 on five assets (§3) is the symptom: one GARCH over twelve years averages regimes the Markov model separates. The two are reported side by side, not reconciled. |
 | §8.4 | Tables 9-10 | Four of the dissertation's five NFT assets are not in this universe. |
-| §11.5 | Factor models, Fama-MacBeth, decile portfolios | Still blocked on the point-in-time top-N universe. |
+| §11.5 | Factor models, Fama-MacBeth, decile portfolios | Built since on the Coin Metrics community universe: `do-valuation-signals-earn-returns.md`. |
 
 ---
 

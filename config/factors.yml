@@ -1,7 +1,7 @@
 # Spec 11.5 on the Coin Metrics community universe (design 2026-10-21-factor-models).
 # Exclusions depend on what a listing IS, never on how it performed.
 min_market_cap_usd: 1000000   # Liu-Tsyvinski-Wu's floor
-min_assets: 50                # first met 2017-12-03, about 5 per decile
+min_assets: 50                # first met 2017-12-24 after exclusions, about 5 per decile
 momentum_weeks: 3
 newey_west_lags: 4
 winsor_quantile: 0.05         # Fama-MacBeth only

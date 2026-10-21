@@ -69,10 +69,11 @@ the asset), and refuses a duplicate entry.
   Coin Metrics coverage is not proof of death.
 * **No risk-free rate.** Long-short factors cancel it; the market premium is raw. A weekly T-bill
   return of about 0.1% against a crypto weekly standard deviation near 20% does not move a test.
-* **Sample start:** the first week with at least **50 eligible assets**, measured as 2017-12-03 (about
-  5 per decile). Earlier weeks hold fewer than 30.
-* Measured: the largest eligible weekly return is +962%, and the smallest is FTT's −93% in the FTX
-  week. No glitch filter is needed.
+* **Sample start:** the first week with at least **50 eligible assets**: 2017-12-24 on the live run,
+  after exclusions (about 5 per decile).
+* Measured: the largest eligible weekly return is +962% (BTG, 2026-01-11, reversed by −91% the next
+  week, likely a vendor glitch), and the smallest is FTT's −93% in the FTX week. No glitch filter:
+  value weighting and the Fama-MacBeth winsorizing bound a micro-cap's effect.
 
 ## 5. The signals
 
