@@ -47,13 +47,18 @@ curated 23. Sector-neutral sorts are not built.
 | Deciles | 10, value-weighted, at least 50 assets carrying the signal; `HL = D10 − D1` | equal weights would hand the result to micro-caps |
 | LTW factors | single 30/40/30 sorts, value-weighted legs: `CMKT`, `CSMB` = small − big, `CMOM` = winners − losers | a 2×3 double sort leaves 8-18 assets a leg |
 | Fama-MacBeth | weekly OLS on percentile ranks in [0, 1], returns winsorized at 5%/95%, at least 50 assets with all four signals | a slope is the top-minus-bottom spread; winsorizing keeps one micro-cap from setting it |
+| Vendor spikes | a Sunday price more than 5x both neighbours (or below 1/5 of both) is nulled | 2 nulled, see below |
 | Inference | Newey-West, 4 lags, two-sided | weekly returns are autocorrelated in volatility |
 | Family | **13 hypotheses**, one Holm-Bonferroni correction | four HL means, three factor means, two alphas, four FM slopes |
 
-The largest weekly return in the panel, +962%, is BTG on 2026-01-11, followed by −91% the next
-week. It looks like a vendor price glitch. It is kept: BTG's cap makes its value weight negligible,
-and Fama-MacBeth winsorizes it. The smallest, −93%, is FTT in the week FTX failed (2022-11-06), and
-it is real.
+**Two vendor spikes are nulled** (`model_id = 'panel'`, `metric = 'spikes_nulled'`). Both are on
+2026-01-18, on BTG and FUN. Coin Metrics prices BTG at about 10x ($0.62 to $6.29) for nine days,
+then back to $0.58. BTG is a micro-cap, but inside a decile of seven micro-caps its value weight was
+15%. Before the rule, that one spike tripled the MVRV spread, from −0.16% to −0.48% a week.
+Nulling the spike Sunday removes the two weekly returns that touch it. A jump that does not revert
+is a real move and is kept. The rule nulls the same two prices at a threshold of 3x, and only BTG
+at 10x. After it, the largest weekly return is +448% (SWRV, 2022-06-19). The smallest is −93%,
+FTT in the week FTX failed (2022-11-06), and it is real.
 
 ## 3. Decile portfolios
 
@@ -61,28 +66,28 @@ Mean weekly return, value-weighted, in percent:
 
 | Decile | `size` | `momentum` | `value` | `mvrv` |
 |---|---|---|---|---|
-| D1 (low) | 0.84 | −0.44 | 0.86 | 0.84 |
-| D2 | 1.73 | −0.04 | −0.05 | 1.00 |
+| D1 (low) | 0.84 | −0.44 | 0.86 | 0.52 |
+| D2 | 1.15 | −0.04 | −0.05 | 1.00 |
 | D3 | 0.42 | −0.05 | 0.28 | 1.10 |
-| D4 | 0.75 | 1.03 | 0.77 | 0.41 |
-| D5 | 0.72 | 0.60 | 0.82 | 0.54 |
-| D6 | 0.24 | 0.53 | 0.86 | 0.30 |
-| D7 | 0.75 | 1.01 | 0.39 | 0.73 |
-| D8 | 0.73 | 0.71 | 0.74 | 0.48 |
-| D9 | 0.92 | 1.19 | 0.94 | 0.34 |
-| D10 (high) | 0.66 | 0.46 | 0.90 | 0.36 |
-| **HL** | **−0.18** | **+0.90** | **+0.05** | **−0.48** |
-| HL t (NW) | −0.38 | 1.50 | 0.09 | −0.83 |
-| HL p | 0.70 | 0.13 | 0.93 | 0.40 |
+| D4 | 0.78 | 1.04 | 0.78 | 0.40 |
+| D5 | 0.73 | 0.59 | 0.82 | 0.56 |
+| D6 | 0.23 | 0.53 | 0.85 | 0.31 |
+| D7 | 0.75 | 1.02 | 0.35 | 0.73 |
+| D8 | 0.73 | 0.70 | 0.74 | 0.48 |
+| D9 | 0.92 | 1.21 | 0.86 | 0.34 |
+| D10 (high) | 0.66 | 0.45 | 0.90 | 0.36 |
+| **HL** | **−0.18** | **+0.89** | **+0.05** | **−0.16** |
+| HL t (NW) | −0.38 | 1.48 | 0.09 | −0.34 |
+| HL p | 0.70 | 0.14 | 0.93 | 0.74 |
 | HL p, Holm | 1.00 | 1.00 | 1.00 | 1.00 |
 | Weeks | 460 | 457 | 459 | 459 |
 | Mean assets a week | 73.2 | 73.0 | 71.3 | 70.1 |
 
 None of the four spreads is distinguishable from zero, even before correction.
 
-- **MVRV** points the way the dissertation implies: low-MVRV ("undervalued") coins earned 0.48% a
-  week more than high-MVRV ones. But the decile means are not monotone, and the t-statistic is
-  −0.83.
+- **MVRV** points weakly the way the dissertation implies: low-MVRV ("undervalued") coins earned
+  0.16% a week more than high-MVRV ones. But the decile means are not monotone, and the t-statistic
+  is −0.34. With the BTG spike left in, this spread was three times larger (§2).
 - **Active addresses over market cap**, §11.5's value factor, has the flattest profile of the four.
   Its HL is 0.05% a week.
 
@@ -91,8 +96,8 @@ None of the four spreads is distinguishable from zero, even before correction.
 | Factor | Mean weekly return | t (NW) | p | p, Holm | Weeks |
 |---|---|---|---|---|---|
 | `CMKT` | +0.67% | 1.44 | 0.150 | 1.00 | 460 |
-| `CSMB` | +0.10% | 0.27 | 0.78 | 1.00 | 460 |
-| **`CMOM`** | **+1.27%** | **2.98** | **0.0029** | **0.037** | 457 |
+| `CSMB` | −0.03% | −0.08 | 0.94 | 1.00 | 460 |
+| **`CMOM`** | **+1.27%** | **2.97** | **0.0030** | **0.039** | 457 |
 
 **Momentum is the one result in this chapter that survives the correction.** The size premium LTW
 report does not appear. That is unsurprising here: the universe is Coin Metrics' coverage, not the
@@ -102,12 +107,12 @@ The two valuation spreads, each regressed on the three factors:
 
 | HL portfolio | Alpha a week | t (NW) | p | p, Holm | β CMKT | β CSMB | β CMOM |
 |---|---|---|---|---|---|---|---|
-| `value` | −0.01% | −0.01 | 0.99 | 1.00 | 0.17 | 0.10 | −0.00 |
-| `mvrv` | −0.39% | −0.84 | 0.40 | 1.00 | −0.02 | −0.87 | −0.01 |
+| `value` | +0.01% | 0.02 | 0.99 | 1.00 | 0.17 | 0.16 | 0.01 |
+| `mvrv` | −0.18% | −0.43 | 0.67 | 1.00 | −0.05 | −0.60 | 0.04 |
 
 Neither signal earns anything the factors do not already price, and neither earned much before
-adjustment. MVRV's spread loads at −0.87 on `CSMB`. It behaves like a big-minus-small portfolio:
-high-MVRV coins are the large ones. Much of what an MVRV sort captures is size.
+adjustment. MVRV's spread loads at −0.60 on `CSMB`. It behaves partly like a big-minus-small portfolio:
+high-MVRV coins tend to be the large ones, so part of what an MVRV sort captures is size.
 
 ## 5. Fama-MacBeth
 
@@ -115,10 +120,10 @@ Weekly cross-sectional slopes on the four ranks jointly, 456 weeks:
 
 | Signal | Mean slope a week | t (NW) | p | p, Holm |
 |---|---|---|---|---|
-| `size` | +0.32% | 0.99 | 0.32 | 1.00 |
-| `momentum` | **−0.48%** | −2.03 | 0.043 | 0.51 |
-| `value` | +0.13% | 0.58 | 0.56 | 1.00 |
-| `mvrv` | +0.16% | 0.63 | 0.53 | 1.00 |
+| `size` | +0.32% | 0.98 | 0.33 | 1.00 |
+| `momentum` | **−0.48%** | −1.99 | 0.046 | 0.55 |
+| `value` | +0.11% | 0.48 | 0.63 | 1.00 |
+| `mvrv` | +0.17% | 0.68 | 0.49 | 1.00 |
 
 The momentum slope has the **opposite sign** to `CMOM`, and it is the only other raw p-value below
 0.05. The two tests weight differently:
@@ -127,7 +132,7 @@ The momentum slope has the **opposite sign** to `CMOM`, and it is the only other
 - **`CMOM`** is value-weighted. Among the large coins that dominate it, winners kept winning.
 
 That is a description of this sample, not a finding the correction lets stand. The Fama-MacBeth
-momentum slope's Holm p is 0.51.
+momentum slope's Holm p is 0.55.
 
 ## 6. What this says about the dissertation
 

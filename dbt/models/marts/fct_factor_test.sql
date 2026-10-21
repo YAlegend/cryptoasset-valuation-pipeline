@@ -4,6 +4,7 @@
 --
 -- portfolio is D1..D10 or HL on decile and alpha rows, NULL otherwise. model_id = '*' holds
 -- the hypothesis count: the family is every 'p_value' row (13 when nothing is refused).
+-- model_id = 'panel', metric = 'spikes_nulled' counts Sunday prices nulled as vendor spikes.
 select
     model_id,
     signal,

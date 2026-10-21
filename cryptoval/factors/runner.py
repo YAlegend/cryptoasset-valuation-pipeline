@@ -2,7 +2,8 @@
 
 ONE Holm family of 13: four decile HL means, three LTW factor means, two factor alphas, four
 Fama-MacBeth slopes. A test that cannot run is a refused ROW carrying the reason, never an
-absent one (the fct_volatility_test contract).
+absent one (the fct_volatility_test contract). The model_id = 'panel' row counts the Sunday
+prices nulled as vendor spikes (panel.py).
 """
 
 from __future__ import annotations
@@ -77,6 +78,7 @@ def run_factors(
 
     lags = config.newey_west_lags
     panel = weekly_panel(daily, config)
+    row(model_id="panel", metric="spikes_nulled", value=float(panel.attrs["spikes_nulled"]))
     deciles = {signal: decile_returns(panel, signal, config) for signal in SIGNALS}
     for signal, table in deciles.items():
         n = float(len(table))

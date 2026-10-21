@@ -18,6 +18,7 @@ class FactorConfig:
     winsor_quantile: float = 0.05
     deciles: int = 10
     tail_share: float = 0.3
+    spike_ratio: float = 5.0
 
 
 def load_factor_config(path: str = "config/factors.yml") -> FactorConfig:

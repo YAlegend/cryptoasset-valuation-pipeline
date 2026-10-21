@@ -37,6 +37,8 @@ def test_thirteen_hypotheses_one_holm_family():
     assert not table.duplicated(["model_id", "signal", "portfolio", "metric"]).any()
     assert {"HL_value", "CMKT"} <= set(returns["series"])
     assert not returns.duplicated(["week", "series"]).any()
+    spikes = table[(table["model_id"] == "panel") & (table["metric"] == "spikes_nulled")]
+    assert spikes["value"].item() == 0
 
 
 def test_an_empty_universe_refuses_every_test():

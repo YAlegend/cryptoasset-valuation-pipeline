@@ -7,6 +7,7 @@ newey_west_lags: 4
 winsor_quantile: 0.05         # Fama-MacBeth only
 deciles: 10
 tail_share: 0.3               # LTW 30/40/30 legs
+spike_ratio: 5                # a Sunday price 5x both neighbours (or 1/5) is a vendor spike
 exclude:
   pegged: [usdt, usdt_omni, usdt_eth, usdt_trx, usdt_avaxc, tusd, tusd_eth, tusd_trx, gusd,
            usdc, usdc_eth, usdc_trx, usdc_avaxc, pax, busd, husd, dai, sai, usdk, frax_eth,

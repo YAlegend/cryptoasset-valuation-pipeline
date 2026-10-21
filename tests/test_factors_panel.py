@@ -63,3 +63,16 @@ def test_exclusions_floor_and_thin_weeks():
 
 def test_an_empty_universe_is_an_empty_panel():
     assert weekly_panel(_daily().iloc[0:0], CONFIG).empty
+
+
+def test_a_spike_and_revert_price_is_nulled_and_counted():
+    daily = _daily(n_assets=2)
+    spike = (daily["asset"] == "a0") & (daily["metric_date"] == SUNDAYS[3])
+    daily.loc[spike, "price_usd"] *= 10.0  # back to normal the next Sunday: a vendor glitch
+    jump = (daily["asset"] == "a1") & (daily["metric_date"] >= SUNDAYS[3])
+    daily.loc[jump, "price_usd"] *= 10.0  # a jump that stays is a real move, kept
+    panel = weekly_panel(daily, CONFIG)
+    a0_weeks = set(panel.loc[panel["asset"] == "a0", "week"])
+    assert SUNDAYS[2] not in a0_weeks and SUNDAYS[3] not in a0_weeks
+    assert SUNDAYS[2] in set(panel.loc[panel["asset"] == "a1", "week"])
+    assert panel.attrs["spikes_nulled"] == 1

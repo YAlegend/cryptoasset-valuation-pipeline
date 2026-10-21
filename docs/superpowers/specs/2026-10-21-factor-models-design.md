@@ -71,9 +71,10 @@ the asset), and refuses a duplicate entry.
   return of about 0.1% against a crypto weekly standard deviation near 20% does not move a test.
 * **Sample start:** the first week with at least **50 eligible assets**: 2017-12-24 on the live run,
   after exclusions (about 5 per decile).
-* Measured: the largest eligible weekly return is +962% (BTG, 2026-01-11, reversed by −91% the next
-  week, likely a vendor glitch), and the smallest is FTT's −93% in the FTX week. No glitch filter:
-  value weighting and the Fama-MacBeth winsorizing bound a micro-cap's effect.
+* **Vendor spikes** (added in the final review): a Sunday price more than `spike_ratio` = 5 times
+  both its neighbours, or below 1/5 of both, is nulled. On the live run this nulls 2 prices, BTG and
+  FUN on 2026-01-18 (BTG read 10x for nine days). Before the rule, BTG at 15% weight inside an MVRV
+  decile tripled that spread. The count is a `model_id = 'panel'` row in `factor_test`.
 
 ## 5. The signals
 
