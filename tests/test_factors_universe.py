@@ -11,7 +11,10 @@ def _client(handler):
 
 
 def _entry(asset, metric, frequency):
-    return {"asset": asset, "metrics": [{"metric": metric, "frequencies": [{"frequency": frequency}]}]}
+    return {
+        "asset": asset,
+        "metrics": [{"metric": metric, "frequencies": [{"frequency": frequency}]}],
+    }
 
 
 def test_catalog_ids_keeps_daily_market_cap_listings_only():
@@ -39,11 +42,15 @@ def test_fetch_follows_pages_and_asks_to_ignore_unsupported_metrics():
     def handler(request):
         seen.append(request.url)
         if "page=2" in str(request.url):
-            return httpx.Response(200, json={"data": [{"asset": "eth", "time": day, "PriceUSD": "130"}]})
+            return httpx.Response(
+                200, json={"data": [{"asset": "eth", "time": day, "PriceUSD": "130"}]}
+            )
         return httpx.Response(
             200,
             json={
-                "data": [{"asset": "btc", "time": day, "PriceUSD": "7400", "CapMrktCurUSD": "1.3e11"}],
+                "data": [
+                    {"asset": "btc", "time": day, "PriceUSD": "7400", "CapMrktCurUSD": "1.3e11"}
+                ],
                 "next_page_url": "https://community-api.coinmetrics.io/v4/x?page=2",
             },
         )
