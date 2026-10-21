@@ -8,6 +8,7 @@ import pytest
 from cryptoval import cli
 from cryptoval.cli import SOURCES, main, run_ingest, run_validate
 from cryptoval.config import Asset, Settings
+from cryptoval.factors.settings import FactorConfig
 from cryptoval.io.bronze import write_silver
 from cryptoval.paths import PathResolver
 from cryptoval.scd2 import merge_scd2
@@ -1379,3 +1380,32 @@ def test_widen_panel_joins_cointime_onto_btc_only():
     empty = pd.DataFrame()
     wide = _widen_panel(panel, empty, empty, empty, cointime).set_index("symbol")
     assert wide.loc["BTC", "liveliness"] == 0.6 and pd.isna(wide.loc["ETH", "liveliness"])
+
+
+def test_factors_fetch_then_run_writes_both_gold_tables(tmp_path, monkeypatch):
+    from test_factors_runner import _universe
+
+    settings = Settings(data_root=str(tmp_path))
+    monkeypatch.setattr(cli, "catalog_ids", lambda client, max_retries=5: ["a00", "usdt"])
+    monkeypatch.setattr(cli, "fetch_universe", lambda client, ids, max_retries=5: _universe())
+    monkeypatch.setattr(
+        cli, "load_factor_config", lambda: FactorConfig(exclude={"usdt": "pegged"}, min_assets=50)
+    )
+    assert cli.run_factors_fetch(settings)["listings"] == 2
+    report = cli.run_factors_cmd(settings)
+    assert report["fama_macbeth"]["refusals"] == 0
+    gold = pathlib.Path(settings.resolver.table("gold", "factor_test")) / "part-0.parquet"
+    assert pd.read_parquet(gold)["panel_vintage_ts"].notna().all()
+    returns = pathlib.Path(settings.resolver.table("gold", "factor_returns")) / "part-0.parquet"
+    assert not pd.read_parquet(returns).empty
+
+
+def test_factors_fetch_refuses_an_exclusion_missing_from_the_catalog(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli, "catalog_ids", lambda client, max_retries=5: ["a00"])
+    monkeypatch.setattr(cli, "load_factor_config", lambda: FactorConfig(exclude={"usdt": "pegged"}))
+    with pytest.raises(ValueError, match="usdt"):
+        cli.run_factors_fetch(Settings(data_root=str(tmp_path)))
+
+
+def test_factors_run_without_a_fetch_says_so(tmp_path):
+    assert "factors fetch" in cli.run_factors_cmd(Settings(data_root=str(tmp_path)))["status"]

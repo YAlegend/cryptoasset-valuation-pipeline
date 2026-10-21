@@ -380,3 +380,25 @@ models:
         tests: [not_null]
       - name: params_hash
         tests: [not_null]
+  - name: fct_factor_test
+    description: >
+      Spec 11.5 cross-sectional asset pricing on the Coin Metrics community universe:
+      value-weighted decile sorts, the Liu-Tsyvinski-Wu factors, factor alphas and
+      Fama-MacBeth slopes, one Holm family. Weekly, full sample, descriptive.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [model_id, signal, portfolio, metric]
+    columns:
+      - name: model_id
+        tests: [not_null]
+      - name: metric
+        tests: [not_null]
+      - name: params_hash
+        tests: [not_null]
+  - name: fct_factor_returns
+    description: The weekly decile spreads and LTW factor returns behind fct_factor_test.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [week, series]

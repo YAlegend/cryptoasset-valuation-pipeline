@@ -1,7 +1,7 @@
 PY := .venv/bin/python
 PIP := .venv/bin/pip
 
-.PHONY: setup test test-integration lint fmt ingest backfill validate reconcile seed cards estimate score econ vol utxo utxo-derive dashboard dbt all
+.PHONY: setup test test-integration lint fmt ingest backfill validate reconcile seed cards estimate score econ vol factors utxo utxo-derive dashboard dbt all
 
 setup:
 	python3 -m venv .venv
@@ -52,6 +52,11 @@ econ:
 vol:
 	$(PY) -m cryptoval.cli vol
 
+# Refetches the Coin Metrics universe whole (~1 min, design 3), then spec 11.5.
+factors:
+	$(PY) -m cryptoval.cli factors fetch
+	$(PY) -m cryptoval.cli factors run
+
 # Spends BigQuery sandbox budget (spec 6.3): run on purpose, monthly, never from `all`.
 utxo:
 	$(PY) -m cryptoval.cli utxo extract
@@ -78,5 +83,6 @@ all:
 	$(MAKE) score
 	$(MAKE) econ
 	$(MAKE) vol
+	$(MAKE) factors
 	$(MAKE) dbt
 	$(MAKE) validate

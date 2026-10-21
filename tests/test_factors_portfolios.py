@@ -44,7 +44,7 @@ def test_a_week_below_min_assets_is_skipped():
 def test_ties_are_broken_by_asset_id():
     week = _week().assign(mvrv=1.0)
     a = decile_returns(week, "mvrv", CONFIG)
-    b = decile_returns(week.sample(frac=1.0, random_state=3), "mvrv", CONFIG)
+    b = decile_returns(week.iloc[::-1], "mvrv", CONFIG)  # reversed rows, same answer
     pd.testing.assert_frame_equal(a, b)
     assert a["HL"].iloc[0] > 0  # ties fall back to id order, and ret rises with id here
 

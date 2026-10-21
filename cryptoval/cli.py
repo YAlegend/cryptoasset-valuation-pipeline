@@ -21,6 +21,9 @@ from cryptoval.contracts.loader import Contract, load_contract
 from cryptoval.econometrics.registry import PAIRS
 from cryptoval.econometrics.runner import run_pairs
 from cryptoval.econometrics.series import LEVEL_SERIES, build_levels
+from cryptoval.factors.runner import run_factors
+from cryptoval.factors.settings import load_factor_config
+from cryptoval.factors.universe import catalog_ids, check_exclusions, fetch_universe
 from cryptoval.io.bronze import write_bronze, write_gold, write_silver
 from cryptoval.manifest import RunManifest
 from cryptoval.methods.registry import METHODS, run_methods
@@ -722,6 +725,37 @@ def run_vol(settings: Settings, assets: list[Asset]) -> dict[str, dict]:
     return report
 
 
+def run_factors_fetch(settings: Settings) -> dict:
+    """The Coin Metrics market-cap universe to silver, replaced whole (spec 11.5, design 3)."""
+    config = load_factor_config()
+    with httpx.Client(timeout=settings.request_timeout_s) as client:
+        ids = catalog_ids(client, max_retries=settings.max_retries)
+        check_exclusions(config, ids)
+        daily = fetch_universe(client, ids, max_retries=settings.max_retries)
+    daily["fetched_at"] = pd.Timestamp.now(tz="UTC")
+    write_silver(settings.resolver, "cm_universe_daily", daily)
+    return {"listings": len(ids), "rows": len(daily), "through": str(daily["metric_date"].max())}
+
+
+def run_factors_cmd(settings: Settings) -> dict:
+    """Spec 11.5 over the fetched universe, full sample, written to gold."""
+    daily = _read_silver(settings, "cm_universe_daily")
+    if daily.empty:
+        return {"status": "no universe in silver; run `cryptoval factors fetch` first"}
+    table, returns = run_factors(daily, load_factor_config(), daily["fetched_at"].max())
+    write_gold(settings.resolver, "factor_test", table)
+    write_gold(settings.resolver, "factor_returns", returns)
+    report: dict[str, dict] = {}
+    for model_id, group in table[table["model_id"] != "*"].groupby("model_id"):
+        holm = group[(group["metric"] == "p_value_holm") & (group["value"] < 0.05)]
+        report[str(model_id)] = {
+            "rows": int(len(group)),
+            "refusals": int((group["metric"] == "refused").sum()),
+            "significant_after_holm": int(len(holm)),
+        }
+    return report
+
+
 def _btc_history(resolver) -> pd.DataFrame:
     """BTC's full Coin Metrics history as (metric_date, price_usd, supply, realized_cap)."""
     raw = read_history(resolver)
@@ -823,6 +857,9 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("vol")
 
+    fc = sub.add_parser("factors")
+    fc.add_argument("action", choices=["fetch", "run"])
+
     ux = sub.add_parser("utxo")
     ux.add_argument("action", choices=["extract", "derive"])
     ux.add_argument("--dry-run", action="store_true", help="price the next range, run nothing")
@@ -882,6 +919,15 @@ def main(argv: list[str] | None = None) -> int:
         for model_id, outcome in sorted(run_vol(settings, assets).items()):
             print(model_id, outcome)
         # No clustering or no time-varying correlation is a result, not a failed run.
+        return 0
+
+    if args.command == "factors":
+        if args.action == "fetch":
+            print(run_factors_fetch(settings))
+        else:
+            for key, outcome in sorted(run_factors_cmd(settings).items()):
+                print(key, outcome)
+        # No priced signal is a result, not a failed run.
         return 0
 
     if args.command == "estimate":

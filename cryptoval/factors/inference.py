@@ -13,13 +13,17 @@ MIN_WEEKS = 52
 
 
 def _hac(y: np.ndarray, x: np.ndarray, lags: int):
-    if len(y) < MIN_WEEKS:
-        raise Unusable(f"{len(y)} weeks, {MIN_WEEKS} needed")
     return sm.OLS(y, x).fit(cov_type="HAC", cov_kwds={"maxlags": lags})
+
+
+def _require(n: int) -> None:
+    if n < MIN_WEEKS:
+        raise Unusable(f"{n} weeks, {MIN_WEEKS} needed")
 
 
 def nw_mean(series: pd.Series, lags: int) -> dict[str, float]:
     y = series.dropna().to_numpy(dtype="float64")
+    _require(len(y))
     fit = _hac(y, np.ones((len(y), 1)), lags)
     return {
         "mean_return": float(fit.params[0]),
@@ -31,6 +35,7 @@ def nw_mean(series: pd.Series, lags: int) -> dict[str, float]:
 
 def nw_alpha(portfolio: pd.Series, factors: pd.DataFrame, lags: int) -> dict[str, float]:
     data = pd.concat([portfolio.rename("_y"), factors], axis=1).dropna()
+    _require(len(data))
     x = sm.add_constant(data[factors.columns].to_numpy(dtype="float64"), has_constant="add")
     fit = _hac(data["_y"].to_numpy(dtype="float64"), x, lags)
     out = {

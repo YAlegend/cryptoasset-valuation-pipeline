@@ -9,6 +9,7 @@ import pathlib
 import re
 
 from cryptoval.econometrics.runner import TEST_COLUMNS
+from cryptoval.factors.runner import FACTOR_COLUMNS
 from cryptoval.scoring.runner import SCORE_COLUMNS
 from cryptoval.volatility.runner import TEST_COLUMNS as VOL_COLUMNS
 
@@ -37,3 +38,7 @@ def test_the_econometrics_mart_selects_exactly_test_columns():
 
 def test_the_volatility_mart_selects_exactly_test_columns():
     assert _selected_columns("dbt/models/marts/fct_volatility_test.sql") == VOL_COLUMNS
+
+
+def test_the_factor_mart_selects_exactly_factor_columns():
+    assert _selected_columns("dbt/models/marts/fct_factor_test.sql") == FACTOR_COLUMNS
