@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime as dt
 import os
 import pathlib
+import tempfile
 
 import altair as alt
 import duckdb
@@ -17,6 +18,7 @@ import pandas as pd
 import streamlit as st
 
 from cryptoval.dashboard import queries as q
+from cryptoval.dashboard import snapshot
 
 DISCLAIMER = (
     "**These are valuation estimates under stated assumptions, not investment advice. These "
@@ -25,7 +27,20 @@ DISCLAIMER = (
 CLIP = 2.0  # heatmap colour clip, in orders of magnitude
 
 
+SNAPSHOT = pathlib.Path(__file__).resolve().parent.parent / "snapshot"
+
+
+@st.cache_resource(show_spinner="Loading the published data...")
+def _from_snapshot(stamp: int) -> str:
+    db = str(pathlib.Path(tempfile.gettempdir()) / f"cryptoval-{stamp}.duckdb")
+    snapshot.build(str(SNAPSHOT), db)
+    return db
+
+
 def _db_path() -> str:
+    # The hosted app (Phase 6) has no data root, only the Parquet the daily run publishes.
+    if "CRYPTOVAL_DATA_ROOT" not in os.environ and SNAPSHOT.is_dir():
+        return _from_snapshot(snapshot.stamp(str(SNAPSHOT)))
     return str(pathlib.Path(os.environ.get("CRYPTOVAL_DATA_ROOT", "data")) / "cryptoval.duckdb")
 
 

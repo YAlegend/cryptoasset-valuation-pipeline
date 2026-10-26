@@ -22,7 +22,7 @@ volatile and these methods disagree by design.**
   - cointegration of price with fundamentals;
   - volatility clustering and time-varying correlation;
   - Holm correction across each family of hypotheses.
-- **Shows** the results in a local Streamlit dashboard.
+- **Shows** the results in a Streamlit dashboard, locally or hosted (below).
 
 ## Reproduce
 
@@ -63,6 +63,20 @@ out of `make all` because it spends that allowance. See
 docker build -t cryptoval .
 docker run --rm -v ~/cryptoval-data:/data cryptoval                  # make all
 docker run --rm -p 8501:8501 -v ~/cryptoval-data:/data cryptoval make dashboard
+```
+
+## Scheduled run and hosted dashboard
+
+`.github/workflows/daily.yml` runs at 06:00 UTC: ingest, dbt, estimate (plus score, econ, vol and
+factors on Sundays), then validate. The data root lives between runs as `data.tar` on the
+`pipeline-data` release. Each run force-pushes a one-commit `dashboard` branch, which holds the code
+and a Parquet snapshot of the four marts the dashboard reads. Streamlit Community Cloud deploys
+that branch with main file `dashboard/app.py`. BigQuery coin-age extraction (`make utxo`) stays
+manual. Seed or reset the state from a local data root:
+
+```bash
+COPYFILE_DISABLE=1 tar -chf data.tar --exclude '*.duckdb' -s ',^cryptoval-data,data,' -C ~ cryptoval-data
+gh release upload pipeline-data data.tar --clobber
 ```
 
 ## Reports

@@ -1,0 +1,82 @@
+# Phase 6, Tier 0: the pipeline runs itself and republishes the dashboard (spec 13).
+# State: the data root (minus the disposable .duckdb) is the `data.tar` asset on the
+# `pipeline-data` release. Dashboard: the code plus a Parquet snapshot of the four marts it reads,
+# force-pushed as a one-commit `dashboard` branch that Streamlit Community Cloud deploys.
+# BigQuery coin-age extraction (`make utxo`) stays manual and monthly.
+name: daily
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+concurrency: daily
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CRYPTOVAL_DATA_ROOT: ${{ github.workspace }}/data
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+      - name: Install
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install torch==2.14.1 --index-url https://download.pytorch.org/whl/cpu
+          .venv/bin/pip install -r requirements.txt
+          .venv/bin/pip install -e .
+          cd dbt && ../.venv/bin/dbt deps --profiles-dir .
+      - name: Restore data
+        run: |
+          gh release download pipeline-data --pattern data.tar
+          tar -xf data.tar && rm data.tar
+      # CoinGecko 429s fail ingest now and then; what did land is still worth building on.
+      - name: Ingest
+        id: ingest
+        continue-on-error: true
+        run: make ingest
+      - name: Build
+        run: |
+          make utxo-derive dbt estimate
+          make dbt
+      # The dashboard reads none of the research marts; weekly keeps the run inside the free minutes.
+      - name: Research (Sundays and manual runs)
+        run: |
+          if [ "$(date -u +%u)" = 7 ] || [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            make score econ vol factors
+            make dbt
+          fi
+      - name: Save data
+        run: |
+          tar -cf data.tar --exclude='*.duckdb' data
+          gh release upload pipeline-data data.tar --clobber
+      - name: Publish dashboard
+        run: |
+          pub=$(mktemp -d)
+          git archive HEAD | tar -x -C "$pub"
+          rm -rf "$pub/.github"
+          .venv/bin/python -m cryptoval.dashboard.snapshot data/cryptoval.duckdb "$pub/snapshot"
+          # Streamlit installs this file: everything the dashboard imports, none of the pipeline's
+          # heavy tooling (CPU torch alone would blow the free tier's disk).
+          grep -vE '^(torch|dbt-|google-cloud|db-dtypes|pytest|ruff)' requirements.txt > "$pub/requirements.txt"
+          echo . >> "$pub/requirements.txt"
+          cd "$pub"
+          git init -q -b dashboard
+          git add -A
+          git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com \
+            commit -qm "dashboard data $(date -u +%F)"
+          git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" dashboard
+      - name: Validate
+        run: make validate
+      - name: Fail if ingest failed
+        if: steps.ingest.outcome == 'failure'
+        run: exit 1
