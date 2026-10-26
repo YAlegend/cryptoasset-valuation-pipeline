@@ -126,8 +126,15 @@ class EquitySource:
         if not tickers:
             return FetchResult(pd.DataFrame(columns=PANEL_COLUMNS), 0)
 
+        # threads=False: parallel downloads race on yfinance's SQLite tz cache ("database is
+        # locked", AMZN dropped in the 2026-10-26 Actions run); six tickers cost nothing serially.
         raw = yfinance.download(
-            tickers, start=start.isoformat(), end=end.isoformat(), auto_adjust=True, progress=False
+            tickers,
+            start=start.isoformat(),
+            end=end.isoformat(),
+            auto_adjust=True,
+            progress=False,
+            threads=False,
         )
         closes = raw["Close"] if "Close" in raw else raw
         tidy = (
