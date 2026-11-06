@@ -17,3 +17,4 @@ htmlcov/
 dbt/.user.yml
 .DS_Store
 .worktrees/
+.claude/

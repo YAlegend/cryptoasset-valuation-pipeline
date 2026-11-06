@@ -194,7 +194,7 @@ class CoinGeckoSupplySource:
     name = "coingecko_supply"
     contract_path = "config/contracts/coingecko_supply.yml"
 
-    def __init__(self, max_retries: int = 5) -> None:
+    def __init__(self, max_retries: int = 7) -> None:
         self.max_retries = max_retries
 
     def fetch(self, start, end, assets, client) -> FetchResult:
