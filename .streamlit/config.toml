@@ -1,3 +1,4 @@
 [theme]
+base = "dark"
 # Streamlit's default red accent reads as "bad" on sparklines and progress bars.
 primaryColor = "#3b82f6"

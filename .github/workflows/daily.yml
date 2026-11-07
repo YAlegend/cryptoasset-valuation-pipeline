@@ -68,7 +68,9 @@ jobs:
           # Streamlit installs this file: everything the dashboard imports, none of the pipeline's
           # heavy tooling (CPU torch alone would blow the free tier's disk).
           grep -vE '^(torch|dbt-|google-cloud|db-dtypes|pytest|ruff)' requirements.txt > "$pub/requirements.txt"
-          echo . >> "$pub/requirements.txt"
+          # Editable: Streamlit Cloud reinstalls only when this file changes, so a plain `.` would
+          # freeze cryptoval at the first deploy's copy while app.py moves on.
+          echo "-e ." >> "$pub/requirements.txt"
           cd "$pub"
           git init -q -b dashboard
           git add -A
