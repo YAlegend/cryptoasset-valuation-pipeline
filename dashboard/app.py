@@ -53,19 +53,6 @@ def _read(db: str, name: str, *args):
         con.close()
 
 
-def _symbols(db: str) -> list[str]:
-    con = duckdb.connect(db, read_only=True)
-    try:
-        return [
-            r[0]
-            for r in con.execute(
-                "select distinct symbol from fct_valuation_estimate order by symbol"
-            ).fetchall()
-        ]
-    finally:
-        con.close()
-
-
 def _banner(db: str) -> None:
     fresh = _read(db, "freshness", dt.date.today())
     coin = fresh["coin_age_through"] or "not extracted"
@@ -78,6 +65,78 @@ def _banner(db: str) -> None:
         st.warning(f"{text} The panel is {age}: run `make all`.")
     else:
         st.caption(text)
+
+
+def _overview(db: str) -> str | None:
+    """The all-asset table; returns the clicked asset (BTC until one is clicked)."""
+    table = _read(db, "overview")
+    if table.empty:
+        st.info("No asset has a price yet.")
+        return None
+    st.caption(
+        "Click a row to open that asset. **Fair value vs price**: the median of the methods' "
+        "latest fair values against price (+50% = methods say it is worth 1.5x its price). "
+        "**Above price**: how many of those methods put fair value above price."
+    )
+    pct = st.column_config.NumberColumn
+    event = st.dataframe(
+        table,
+        key="overview",
+        hide_index=True,
+        width="stretch",
+        on_select="rerun",
+        selection_mode="single-row",
+        column_order=[
+            "symbol",
+            "price_usd",
+            "change_7d",
+            "change_30d",
+            "market_cap_usd",
+            "median_upside",
+            "above",
+            "methods",
+            "price_date",
+        ],
+        column_config={
+            "symbol": "Asset",
+            "price_usd": pct("Price", format="dollar"),
+            "change_7d": pct("7d", format="percent"),
+            "change_30d": pct("30d", format="percent"),
+            "market_cap_usd": pct("Market cap", format="compact"),
+            "median_upside": pct("Fair value vs price", format="percent"),
+            "above": pct("Above price"),
+            "methods": pct("Methods"),
+            "price_date": st.column_config.DateColumn("As of"),
+        },
+    )
+    rows = event.selection.rows  # positions in `table`, whatever the on-screen sort
+    if rows:
+        return table["symbol"].iloc[rows[0]]
+    return "BTC" if "BTC" in set(table["symbol"]) else table["symbol"].iloc[0]
+
+
+def _asset(db: str, symbol: str) -> None:
+    st.subheader(symbol)
+    prices = _read(db, "price_series", symbol)
+    if not prices.empty:
+        st.altair_chart(
+            alt.Chart(prices)
+            .mark_line()
+            .encode(
+                x=alt.X("metric_date:T", title=None),
+                y=alt.Y("price_usd:Q", title="price, USD", scale=alt.Scale(zero=False)),
+                tooltip=["metric_date:T", alt.Tooltip("price_usd:Q", format=",.2f")],
+            )
+            .properties(height=260)
+            .interactive(bind_y=False),
+            width="stretch",
+        )
+        st.caption("Scroll to zoom, drag to pan, double-click to reset.")
+    st.markdown(
+        "**Fair value by method.** Each bar is one method's range of fair values across its "
+        "parameter grid, the tick its median; the red dashed line is today's price."
+    )
+    _football_field(db, symbol)
 
 
 def _football_field(db: str, symbol: str) -> None:
@@ -138,6 +197,7 @@ def _indicators(db: str) -> None:
         alt.Chart(series)
         .mark_line()
         .encode(x=alt.X("metric_date:T", title=None), y=alt.Y("value:Q", title=name))
+        .interactive(bind_y=False)
     )
     layers = [chart]
     for level in q.THRESHOLDS.get(name, []):
@@ -275,13 +335,11 @@ def main() -> None:
         st.error(f"No database at {db}. Build it with `make all`, then reload.")
         return
     _banner(db)
-    tabs = st.tabs(["Football field", "Cycle indicators", "Method agreement", "DCF sliders"])
+    tabs = st.tabs(["Overview", "Cycle indicators", "Method agreement", "DCF sliders"])
     with tabs[0]:
-        symbols = _symbols(db)
-        symbol = st.selectbox(
-            "Asset", symbols, index=symbols.index("BTC") if "BTC" in symbols else 0
-        )
-        _football_field(db, symbol)
+        symbol = _overview(db)
+        if symbol is not None:
+            _asset(db, symbol)
     with tabs[1]:
         _indicators(db)
     with tabs[2]:

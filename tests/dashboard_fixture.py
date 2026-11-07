@@ -52,12 +52,16 @@ def build(con) -> None:
             "symbol": "BTC",
             "metric_date": days,
             "price_usd": [100.0 + i for i in range(N)],
+            "market_cap_usd": [1e6 + i for i in range(N)],
+            "supply": [10.0] * (N - 1) + [None],  # supply lags price by a day
             "mvrv": 2.0,
             "issuance_usd": 10.0,
             "panel_vintage_ts": vintage,
         }
     )
-    usdc = btc.assign(symbol="USDC", price_usd=1.0, mvrv=None, issuance_usd=None)
+    usdc = btc.assign(
+        symbol="USDC", price_usd=1.0, market_cap_usd=5e5, supply=None, mvrv=None, issuance_usd=None
+    )
     panel = pd.concat([btc, usdc], ignore_index=True)
     cointime = pd.DataFrame({"symbol": "BTC", "metric_date": days, "liveliness": 0.6})
     methods = pd.DataFrame(

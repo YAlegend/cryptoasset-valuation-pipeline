@@ -93,3 +93,25 @@ def test_freshness_on_an_empty_panel_is_stale_not_a_crash(con):
     con.execute("delete from fct_asset_metrics_daily")
     fresh = q.freshness(con, LAST)
     assert fresh["panel_through"] is None and fresh["stale"]
+
+
+def test_overview_has_one_row_per_asset_with_changes_and_method_votes(con):
+    got = q.overview(con).set_index("symbol")
+    assert list(got.index) == ["USDC", "BTC"]  # largest market cap first
+    btc, usdc = got.loc["BTC"], got.loc["USDC"]
+    assert btc["price_date"] == LAST and btc["price_usd"] == 499.0
+    assert btc["change_7d"] == pytest.approx(499 / 492 - 1)
+    assert btc["change_30d"] == pytest.approx(499 / 469 - 1)
+    # both BTC fair values (60/499, 60/498) sit below price: median upside is their median ratio
+    assert btc["methods"] == 2 and btc["above"] == 0
+    assert btc["median_upside"] == pytest.approx(
+        10 ** ((math.log10(60 / 499) + math.log10(60 / 498)) / 2) - 1
+    )
+    assert btc["market_cap_usd"] == 4990.0  # today's price x yesterday's supply
+    assert usdc["market_cap_usd"] == 5e5  # no supply: the stored market cap
+    assert usdc["methods"] == 0 and math.isnan(usdc["median_upside"])
+
+
+def test_price_series_is_the_positive_price_history(con):
+    s = q.price_series(con, "BTC")
+    assert len(s) == 400 and s["price_usd"].iloc[-1] == 499.0 and s["metric_date"].iloc[-1] == LAST

@@ -151,6 +151,58 @@ def agreement(con) -> pd.DataFrame:
     return out
 
 
+def overview(con) -> pd.DataFrame:
+    """One row per asset, largest market cap first: latest price, 7d and 30d change, market cap
+    (latest price x latest known supply), and how the price-returning methods' latest fair values
+    (as in agreement) sit against price."""
+    out = con.execute(
+        """
+        with p as (select symbol, metric_date, price_usd
+                   from fct_asset_metrics_daily where price_usd > 0),
+        last as (select symbol, max(metric_date) as metric_date from p group by symbol),
+        -- supply lands a day after price, and stops early for some assets (BNB, DOT)
+        known as (
+            select symbol,
+                   arg_max(supply, metric_date) filter (where supply > 0) as supply,
+                   arg_max(market_cap_usd, metric_date) filter (where market_cap_usd > 0) as cap
+            from fct_asset_metrics_daily group by symbol
+        )
+        select l.symbol, l.metric_date as price_date, n.price_usd,
+               coalesce(n.price_usd * k.supply, k.cap) as market_cap_usd,
+               n.price_usd / w.price_usd - 1 as change_7d,
+               n.price_usd / m.price_usd - 1 as change_30d
+        from last l
+        join p n using (symbol, metric_date)
+        left join known k on k.symbol = l.symbol
+        left join p w on w.symbol = l.symbol and w.metric_date = l.metric_date - 7
+        left join p m on m.symbol = l.symbol and m.metric_date = l.metric_date - 30
+        order by market_cap_usd desc nulls last, l.symbol
+        """
+    ).fetchdf()
+    votes = (
+        agreement(con)
+        .groupby("symbol")["log_ratio"]
+        .agg(methods="size", above=lambda r: int((r > 0).sum()), median_log_ratio="median")
+        .reset_index()
+    )
+    out = out.merge(votes, on="symbol", how="left")
+    out["methods"] = out["methods"].fillna(0).astype(int)
+    out["above"] = out["above"].fillna(0).astype(int)
+    out["median_upside"] = 10 ** out.pop("median_log_ratio") - 1
+    out["price_date"] = out["price_date"].map(_date)
+    return out
+
+
+def price_series(con, symbol: str) -> pd.DataFrame:
+    out = con.execute(
+        "select metric_date, price_usd from fct_asset_metrics_daily "
+        "where symbol = ? and price_usd > 0 order by metric_date",
+        [symbol],
+    ).fetchdf()
+    out["metric_date"] = out["metric_date"].map(_date)
+    return out
+
+
 def dcf_inputs(con) -> pd.DataFrame:
     """The recorded inputs of each DCF's latest applicable row, one per (symbol, method)."""
     placeholders = ", ".join("?" for _ in DCF_METHODS)
