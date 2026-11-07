@@ -89,11 +89,20 @@ def build(con) -> None:
             _estimate("USDC", LAST, "realized_price", None, False, reason="no mvrv"),
         ]
     )
+    assets = pd.DataFrame(
+        {
+            "symbol": ["BTC", "USDC"],
+            "sector": ["pow_monetary", "stablecoin"],
+            "coverage_note": [None, "a stablecoin"],
+            "total_supply": [20.0, 6e5],
+        }
+    )
     for name, frame in {
         "fct_asset_metrics_daily": panel,
         "fct_btc_cointime_daily": cointime,
         "dim_method": methods,
         "fct_valuation_estimate": estimates,
+        "dim_asset": assets,
     }.items():
         con.register("_frame", frame)
         con.execute(f"create or replace table {name} as select * from _frame")

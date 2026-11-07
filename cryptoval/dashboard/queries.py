@@ -152,28 +152,43 @@ def agreement(con) -> pd.DataFrame:
 
 
 def overview(con) -> pd.DataFrame:
-    """One row per asset, largest market cap first: latest price, 7d and 30d change, market cap
-    (latest price x latest known supply), and how the price-returning methods' latest fair values
-    (as in agreement) sit against price."""
+    """One row per asset, largest market cap first: sector, latest price, 7d and 30d change,
+    market cap, the last 90 days of price, and how the price-returning methods' latest fair
+    values (as in agreement) sit against price."""
     out = con.execute(
         """
         with p as (select symbol, metric_date, price_usd
                    from fct_asset_metrics_daily where price_usd > 0),
         last as (select symbol, max(metric_date) as metric_date from p group by symbol),
-        -- supply lands a day after price, and stops early for some assets (BNB, DOT)
         known as (
             select symbol,
                    arg_max(supply, metric_date) filter (where supply > 0) as supply,
-                   arg_max(market_cap_usd, metric_date) filter (where market_cap_usd > 0) as cap
+                   max(metric_date) filter (where supply > 0) as supply_date,
+                   arg_max(market_cap_usd, metric_date) filter (where market_cap_usd > 0) as cap,
+                   max(metric_date) filter (where market_cap_usd > 0) as cap_date
             from fct_asset_metrics_daily group by symbol
+        ),
+        spark as (
+            select p.symbol, list(p.price_usd order by p.metric_date) as last_90d
+            from p join last l on p.symbol = l.symbol and p.metric_date > l.metric_date - 90
+            group by p.symbol
         )
-        select l.symbol, l.metric_date as price_date, n.price_usd,
-               coalesce(n.price_usd * k.supply, k.cap) as market_cap_usd,
+        select l.symbol, a.sector, a.coverage_note, l.metric_date as price_date, n.price_usd,
+               -- supply lands a day after price and stops years early for BNB and DOT, so a
+               -- month-stale panel gives way to CoinGecko's current total supply
+               coalesce(
+                   case when k.supply_date >= l.metric_date - 30 then n.price_usd * k.supply end,
+                   case when k.cap_date >= l.metric_date - 30 then k.cap end,
+                   n.price_usd * a.total_supply
+               ) as market_cap_usd,
                n.price_usd / w.price_usd - 1 as change_7d,
-               n.price_usd / m.price_usd - 1 as change_30d
+               n.price_usd / m.price_usd - 1 as change_30d,
+               s.last_90d
         from last l
         join p n using (symbol, metric_date)
         left join known k on k.symbol = l.symbol
+        left join dim_asset a on a.symbol = l.symbol
+        left join spark s on s.symbol = l.symbol
         left join p w on w.symbol = l.symbol and w.metric_date = l.metric_date - 7
         left join p m on m.symbol = l.symbol and m.metric_date = l.metric_date - 30
         order by market_cap_usd desc nulls last, l.symbol
@@ -189,6 +204,7 @@ def overview(con) -> pd.DataFrame:
     out["methods"] = out["methods"].fillna(0).astype(int)
     out["above"] = out["above"].fillna(0).astype(int)
     out["median_upside"] = 10 ** out.pop("median_log_ratio") - 1
+    out["fair_value"] = out["price_usd"] * (1 + out["median_upside"])
     out["price_date"] = out["price_date"].map(_date)
     return out
 

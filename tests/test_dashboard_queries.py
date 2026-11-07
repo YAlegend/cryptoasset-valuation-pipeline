@@ -109,7 +109,15 @@ def test_overview_has_one_row_per_asset_with_changes_and_method_votes(con):
     )
     assert btc["market_cap_usd"] == 4990.0  # today's price x yesterday's supply
     assert usdc["market_cap_usd"] == 5e5  # no supply: the stored market cap
+    assert btc["sector"] == "pow_monetary" and len(btc["last_90d"]) == 90
+    assert btc["fair_value"] == pytest.approx(499 * (1 + btc["median_upside"]))
     assert usdc["methods"] == 0 and math.isnan(usdc["median_upside"])
+
+
+def test_overview_market_cap_falls_back_to_total_supply_when_the_panel_is_stale(con):
+    con.execute("update fct_asset_metrics_daily set supply = null, market_cap_usd = null")
+    got = q.overview(con).set_index("symbol")["market_cap_usd"]
+    assert got["BTC"] == 499.0 * 20 and got["USDC"] == 6e5
 
 
 def test_price_series_is_the_positive_price_history(con):

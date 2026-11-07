@@ -1,6 +1,6 @@
 """The dashboard's published data (Phase 6, Tier 0).
 
-The full .duckdb is ~300 MB; the four marts the dashboard reads export to ~60 MB of zstd Parquet,
+The full .duckdb is ~300 MB; the marts the dashboard reads export to ~60 MB of zstd Parquet,
 split under GitHub's 50 MB per-file warning, which the daily workflow commits to the `dashboard`
 branch. The hosted app rebuilds a DuckDB file from that Parquet on start.
 """
@@ -17,6 +17,7 @@ TABLES = (
     "fct_btc_cointime_daily",
     "fct_valuation_estimate",
     "dim_method",
+    "dim_asset",
 )
 
 

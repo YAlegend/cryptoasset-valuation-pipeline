@@ -21,7 +21,7 @@ def test_hosted_app_renders_from_the_published_snapshot(tmp_path, monkeypatch):
     at = AppTest.from_file(str(tmp_path / "dashboard" / "app.py"), default_timeout=60).run()
     assert not at.exception, at.exception
     assert not at.error
-    assert len(at.tabs) == 4
+    assert list(at.dataframe[0].value["symbol"]) == ["USDC", "BTC"]
     snapshot.build(str(tmp_path / "snapshot"), f"{tmp_path}/rebuilt.duckdb")
     con = duckdb.connect(db, read_only=True)
     con.execute(f"attach '{tmp_path}/rebuilt.duckdb' as rebuilt (read_only)")

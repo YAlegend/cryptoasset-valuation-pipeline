@@ -18,15 +18,53 @@ def data_root(tmp_path, monkeypatch):
     return tmp_path
 
 
-def _markdown(at) -> str:
-    return " ".join(m.value for m in at.markdown)
+def _text(at) -> str:
+    return " ".join(m.value for m in [*at.markdown, *at.caption])
 
 
-def test_app_renders_every_tab_against_a_fixture_database(data_root):
+def _asset(symbol: str) -> AppTest:
+    at = AppTest.from_file(APP, default_timeout=60)
+    at.query_params["asset"] = symbol
+    return at.run()
+
+
+def test_screener_lists_every_asset_against_a_fixture_database(data_root):
     at = AppTest.from_file(APP, default_timeout=60).run()
     assert not at.exception, at.exception
-    assert DISCLAIMER in _markdown(at)
-    assert len(at.tabs) == 4
+    assert DISCLAIMER in _text(at)
+    assert list(at.dataframe[0].value["symbol"]) == ["USDC", "BTC"]
+    assert at.metric[2].value == "2"  # assets
+
+
+def test_asset_page_shows_price_models_indicators_and_dcf(data_root):
+    at = _asset("btc")
+    assert not at.exception, at.exception
+    assert at.title[0].value == "BTC"
+    assert [m.label for m in at.metric][:4] == [
+        "Price",
+        "Market cap",
+        "Model fair value",
+        "Models above price",
+    ]
+    assert [h.value for h in at.subheader] == [
+        "Valuation models",
+        "On-chain cycle indicators",
+        "DCF calculator",
+    ]
+    assert DISCLAIMER in _text(at)
+
+
+def test_an_asset_with_no_models_says_so(data_root):
+    at = _asset("USDC")
+    assert not at.exception, at.exception
+    assert any("No valuation model" in i.value for i in at.info)
+    assert at.metric[3].value == "none apply"
+
+
+def test_an_unknown_asset_warns_instead_of_crashing(data_root):
+    at = _asset("NOPE")
+    assert not at.exception
+    assert any("NOPE" in w.value for w in at.warning)
 
 
 def test_app_without_a_database_says_how_to_build_one(tmp_path, monkeypatch):
@@ -43,8 +81,8 @@ def test_app_holds_no_connection_open_between_reads(data_root):
 
 
 def test_dcf_tab_prices_the_row_and_refuses_an_inverted_gordon(data_root):
-    at = AppTest.from_file(APP, default_timeout=60).run()
-    assert [m.label for m in at.metric] == [
+    at = _asset("BTC")
+    assert [m.label for m in at.metric][4:] == [
         "Fair value per token",
         "Latest price",
         "Terminal share of value",
@@ -64,7 +102,7 @@ def test_a_stored_dcf_setting_outside_the_slider_range_is_clamped(data_root):
         "where method_id = 'defi_net_revenue_dcf'"
     )
     con.close()
-    at = AppTest.from_file(APP, default_timeout=60).run()
+    at = _asset("BTC")
     assert not at.exception
     assert at.slider[0].value == 0.40
     assert any("outside the slider" in c.value for c in at.caption)
