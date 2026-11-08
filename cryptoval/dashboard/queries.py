@@ -219,6 +219,55 @@ def price_series(con, symbol: str) -> pd.DataFrame:
     return out
 
 
+def fair_value_series(con, symbol: str, families: list[str]) -> pd.DataFrame:
+    """Daily model fair value: the median, across the given families' models applicable that
+    day, of each model's grid median. Geometric (a median of logs), as the overview's is."""
+    out = con.execute(
+        """
+        with cell as (
+            select cast(e.metric_date as date) as metric_date, e.method_id,
+                   median(e.fair_value) as fair_value
+            from fct_valuation_estimate e
+            join dim_method m using (method_id)
+            where e.symbol = ? and m.returns_fair_value and e.applicable and e.fair_value > 0
+              and list_contains(?, m.family)
+            group by all
+        )
+        select metric_date, exp(median(ln(fair_value))) as fair_value, count(*) as models
+        from cell group by metric_date order by metric_date
+        """,
+        [symbol, families],
+    ).fetchdf()
+    out["metric_date"] = out["metric_date"].map(_date)
+    return out
+
+
+def model_series(con, symbol: str, method_id: str) -> pd.DataFrame:
+    """One model's grid range and median per applicable day, beside that day's price."""
+    out = con.execute(
+        """
+        select cast(e.metric_date as date) as metric_date, min(e.fair_value) as low,
+               median(e.fair_value) as mid, max(e.fair_value) as high,
+               any_value(p.price_usd) as price_usd
+        from fct_valuation_estimate e
+        left join fct_asset_metrics_daily p
+               on p.symbol = e.symbol and p.metric_date = cast(e.metric_date as date)
+        where e.symbol = ? and e.method_id = ? and e.applicable and e.fair_value > 0
+        group by 1 order by 1
+        """,
+        [symbol, method_id],
+    ).fetchdf()
+    out["metric_date"] = out["metric_date"].map(_date)
+    return out
+
+
+def method_info(con, method_id: str) -> dict | None:
+    row = con.execute(
+        "select family, requires, citation from dim_method where method_id = ?", [method_id]
+    ).fetchone()
+    return None if row is None else dict(zip(("family", "requires", "citation"), row, strict=True))
+
+
 def dcf_inputs(con) -> pd.DataFrame:
     """The recorded inputs of each DCF's latest applicable row, one per (symbol, method)."""
     placeholders = ", ".join("?" for _ in DCF_METHODS)

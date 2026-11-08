@@ -123,3 +123,23 @@ def test_overview_market_cap_falls_back_to_total_supply_when_the_panel_is_stale(
 def test_price_series_is_the_positive_price_history(con):
     s = q.price_series(con, "BTC")
     assert len(s) == 400 and s["price_usd"].iloc[-1] == 499.0 and s["metric_date"].iloc[-1] == LAST
+
+
+def test_fair_value_series_is_the_daily_geometric_median_of_model_medians(con):
+    every = q.fair_value_series(con, "BTC", ["E_cost", "C_cashflow"]).set_index("metric_date")
+    # PREV: realized_price 50 and the DCF's two cells' median 60; the signal never counts
+    assert every.loc[PREV, "fair_value"] == pytest.approx(math.sqrt(50 * 60))
+    assert every.loc[PREV, "models"] == 2
+    assert every.loc[LAST, "fair_value"] == pytest.approx(60) and every.loc[LAST, "models"] == 1
+    cost = q.fair_value_series(con, "BTC", ["E_cost"]).set_index("metric_date")
+    assert cost.loc[PREV, "fair_value"] == pytest.approx(50)
+
+
+def test_model_series_is_one_models_daily_range_beside_price(con):
+    [row] = q.model_series(con, "BTC", "defi_net_revenue_dcf").to_dict("records")
+    assert row == {"metric_date": PREV, "low": 40.0, "mid": 60.0, "high": 80.0, "price_usd": 498.0}
+
+
+def test_method_info_reads_dim_method(con):
+    assert q.method_info(con, "realized_price")["family"] == "E_cost"
+    assert q.method_info(con, "no_such_model") is None

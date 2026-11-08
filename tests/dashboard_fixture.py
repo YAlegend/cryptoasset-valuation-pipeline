@@ -73,7 +73,7 @@ def build(con) -> None:
             ("never_applies", "D_multiples", True),
         ],
         columns=["method_id", "family", "returns_fair_value"],
-    )
+    ).assign(requires="price_usd|supply", citation="A paper, section 1")
     estimates = pd.DataFrame(
         [
             _estimate("BTC", PREV, "realized_price", 50.0, True, circular=True),

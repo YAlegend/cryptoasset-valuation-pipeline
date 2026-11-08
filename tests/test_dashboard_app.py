@@ -106,3 +106,33 @@ def test_a_stored_dcf_setting_outside_the_slider_range_is_clamped(data_root):
     assert not at.exception
     assert at.slider[0].value == 0.40
     assert any("outside the slider" in c.value for c in at.caption)
+
+
+def test_turning_a_model_family_off_recomputes_the_cards(data_root):
+    at = _asset("BTC")
+    assert at.metric[3].value == "0 of 2"
+    at.pills(key="families").set_value(["Cash flow"]).run()
+    assert not at.exception, at.exception
+    assert at.metric[3].value == "0 of 1"  # realized_price (cost basis) left out
+    at.pills(key="families").set_value([]).run()
+    assert at.metric[3].value == "none apply"
+    assert any("No valuation model" in i.value for i in at.info)
+
+
+def test_a_clicked_model_opens_its_detail_and_close_returns(data_root):
+    at = AppTest.from_file(APP, default_timeout=60)
+    at.query_params.update(asset="BTC", model="defi_net_revenue_dcf")
+    at.run()
+    assert not at.exception, at.exception
+    assert "Defi Net Revenue DCF" in [h.value for h in at.subheader]
+    assert any("A paper, section 1" in c.value for c in at.caption)
+    at.button(key="close_model").click().run()
+    assert "model" not in at.query_params
+    assert "Defi Net Revenue DCF" not in [h.value for h in at.subheader]
+
+
+def test_compare_tab_lines_up_the_first_three_assets(data_root):
+    at = AppTest.from_file(APP, default_timeout=60).run()
+    assert not at.exception, at.exception
+    assert at.multiselect[0].value == ["USDC", "BTC"]
+    assert list(at.dataframe[-1].value["symbol"]) == ["USDC", "BTC"]
