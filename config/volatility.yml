@@ -1,0 +1,18 @@
+# The dissertation's correlation windows (Tables 3-10), named as it names them, and the
+# anchors every pair is built on. Design 7-8.
+windows:
+  full_2018_2022: [2018-01-01, 2022-11-30]       # Table 3
+  jan21_jan22: [2021-01-01, 2022-01-31]          # Table 4
+  feb22_may22: [2022-02-01, 2022-05-31]          # Table 5
+  jun22_nov22: [2022-06-01, 2022-11-30]          # Table 6
+  peak_oct21_nov21: [2021-10-01, 2021-11-30]     # Table 7, the bull-market peak
+  equities_2020_2022: [2020-01-01, 2022-11-30]   # Table 8
+  nft_2020_2021: [2020-01-01, 2021-06-30]        # Table 9
+  nft_2021_2022: [2021-07-01, 2022-11-30]        # Table 10
+peak_window: peak_oct21_nov21
+crypto_anchors: [BTC]
+traditional_anchors: [BTC, ETH]
+arch_lm_lags: 7
+exhaustion_block_days: 30
+engle_sheppard_lags: 5
+markov_search_reps: 20

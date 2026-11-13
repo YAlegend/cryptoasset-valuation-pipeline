@@ -1,0 +1,25 @@
+method_id: metcalfe_estimated
+family: B_network
+# market_cap_usd is the REGRESSAND, not a derived input, so this method is not circular --
+# active addresses are a genuinely independent fundamental (spec 10.1).
+requires: [market_cap_usd, active_addresses, supply]
+min_density: 0.6
+min_rows: 365
+params:
+  min_fit_rows: 180
+  refit_every_rows: 30
+citation: "Metcalfe (1995); Alabi (2017); Peterson (2018). beta estimated, never assumed to be 2.0"
+
+# Card prose (spec 12): the judgment that cannot be derived from the spec above.
+failure_modes:
+- 'An active address is not a user: one user holds many addresses, and one exchange address serves many
+  users.'
+- Exchange consolidation or an L2 migration moves the series with no change in adoption, and the fit
+  reads it as adoption.
+- 'A high R-squared between two trending series is not evidence: read durbin_watson and residuals_autocorrelated
+  first; below the DW floor the beta confidence interval is too narrow to quote.'
+- beta is refit on a trailing window, so it drifts, and a window spanning a regime break fits the break.
+assumptions:
+- Market cap is a power function of active addresses with an exponent that is constant over the fit
+  window - estimated, never assumed to be 2.0.
+- Address counts are comparable over time for a given chain.

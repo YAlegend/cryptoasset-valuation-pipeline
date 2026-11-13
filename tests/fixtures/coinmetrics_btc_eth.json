@@ -1,0 +1,5 @@
+{"data":[
+ {"asset":"btc","time":"2026-10-05T00:00:00.000000000Z","CapMrktCurUSD":"1725000000000","CapMVRVCur":"1.5967","PriceUSD":"87000","SplyCur":"19827586.2","HashRate":"1167730645.36","IssTotUSD":"28000000","FeeTotNtv":"12.5","AdrActCnt":"660864","TxCnt":"420000","volume_reported_spot_usd_1d":"22819828752"},
+ {"asset":"btc","time":"2026-10-06T00:00:00.000000000Z","CapMrktCurUSD":"1719000000000","CapMVRVCur":"1.5905","PriceUSD":"86700","SplyCur":"19827700.0","HashRate":"1022588981.51","IssTotUSD":"27800000","FeeTotNtv":"11.9","AdrActCnt":"636796","TxCnt":"410000","volume_reported_spot_usd_1d":"19551234567"},
+ {"asset":"eth","time":"2026-10-05T00:00:00.000000000Z","CapMrktCurUSD":"331300000000","CapMVRVCur":"1.1508","PriceUSD":"2740","SplyCur":"120912408.0","IssTotUSD":"2400000","FeeTotNtv":"310.4","AdrActCnt":"647739","TxCnt":"1250000"}
+]}

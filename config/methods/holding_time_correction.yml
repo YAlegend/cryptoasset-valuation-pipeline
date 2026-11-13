@@ -1,0 +1,22 @@
+method_id: holding_time_correction
+family: A_monetary
+requires: [velocity_total]
+min_density: 0.6
+min_rows: 365
+params: {window_rows: 365}
+returns_fair_value: false
+citation: "Kampakis et al. (2024); corrects dissertation sections 3.1 and 3.6"
+
+# Card prose (spec 12): the judgment that cannot be derived from the spec above.
+failure_modes:
+- 'The closed form assumes log-normal velocity: read anderson_darling_p, and treat a rejection as ''this
+  ratio is an approximation for this asset''.'
+- It returns a correction factor, not a price (returns_fair_value is false); multiplying it into a fair
+  value is a category error.
+- velocity_total is market-cap-derived, so the input is circular even though the output is a diagnostic.
+- A 365-row window spanning a volatility regime change mixes two distributions and the fitted sigma
+  belongs to neither.
+assumptions:
+- Daily velocity is log-normally distributed within the window.
+- exp(sigma^2) captures the whole bias in inverting velocity, which is the correction Kampakis et al.
+  (2024) derive.

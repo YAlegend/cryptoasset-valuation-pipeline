@@ -1,0 +1,6 @@
+data_root: ./data
+trailing_refetch_days: 30
+bigquery_monthly_byte_budget: 900000000000   # 0.9 TB, inside the 1 TB sandbox free tier
+bigquery_project: cryptoval-sandbox-3141   # no billing account; never the gcloud default project
+request_timeout_s: 30
+max_retries: 5

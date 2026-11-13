@@ -1,0 +1,44 @@
+contract:
+  name: coinmetrics_asset_metrics
+  version: "1.0.0"
+  owner: yasir
+  source_url: https://community-api.coinmetrics.io/v4
+
+schema:
+  # CapMrktCurUSD is NOT required: Coin Metrics legitimately omits it (6,623 rows on
+  # 2026-10-11, e.g. BNB and DOT), so requiring it failed the gate on normal vendor
+  # behaviour. The range bound and the identity checks still apply (fix round 1, Ruling E).
+  required:
+    - asset
+    - metric_date
+  columns:
+    asset: {type: string}
+    metric_date: {type: date}
+    CapMrktCurUSD: {type: float, minimum: 0, max_null_fraction: 0.30}   # live 11.7%
+    CapMVRVCur: {type: float, minimum: 0, max_null_fraction: 0.30}      # live 11.7%
+    HashRate: {type: float, minimum: 0}
+    IssTotUSD: {type: float, minimum: 0, max_null_fraction: 0.30}       # live 11.7%
+    FeeTotNtv: {type: float, minimum: 0}
+    AdrActCnt: {type: float, minimum: 0}
+    TxCnt: {type: float, minimum: 0}
+    SplyCur: {type: float, minimum: 0, max_null_fraction: 0.25}         # live 8.3%
+    PriceUSD: {type: float, minimum: 0, max_null_fraction: 0.20}        # live 5.2%
+    # Reported spot volume, the equation-of-exchange T term. This is Coin Metrics'
+    # reported-exchange construction, NOT CoinGecko's total_volume: different exchange
+    # coverage, so the two series are not interchangeable (fix round 1, Ruling B).
+    # No asset trades 1e12 USD in a day: global spot volume is ~1e11. Coin Metrics'
+    # free tier served values up to 7e55 USD on 2026-10-11 (14 rows, USDC and trx_eth),
+    # and the largest credible value in the same panel was 7.5e10 (fix round 1, Ruling J).
+    volume_reported_spot_usd_1d: {type: float, minimum: 0, maximum: 1.0e+12, max_null_fraction: 0.25}  # live 6.3%
+
+quality:
+  freshness:
+    max_delay_hours: 48          # published T+1 after UTC close, 48h allows for a late day
+  uniqueness:
+    combination: [asset, metric_date]
+  volume:
+    anomaly_threshold: 5.0       # |x - trailing mean| / trailing mean = +500%: a spike detector, not volatility (spec 9.2)
+
+versioning:
+  breaking_changes: [removing_required_field, changing_field_type, renaming_field]
+  non_breaking_changes: [adding_optional_field, changing_description]

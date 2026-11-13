@@ -1,0 +1,33 @@
+contract:
+  name: equity_prices
+  version: "1.0.0"
+  owner: yasir
+  source_url: https://finance.yahoo.com
+
+schema:
+  # market_cap_usd and volume_usd are columns of the shared panel shape that yfinance
+  # daily bars do not provide, so they are declared but never required: every value is
+  # NULL by construction and must not be read as zero.
+  required:
+    - asset
+    - metric_date
+    - price_usd
+  columns:
+    asset: {type: string}
+    metric_date: {type: date}
+    price_usd: {type: float, minimum: 0, max_null_fraction: 0.10}
+    market_cap_usd: {type: float, minimum: 0}
+    volume_usd: {type: float, minimum: 0}
+
+quality:
+  freshness:
+    # Equity markets close, and yfinance's end date is exclusive, so the newest bar a run
+    # can store is T-1. Measured: a Monday 13:00 UTC validate against Friday's bar is 85h,
+    # and a Monday-holiday week leaves Thursday's bar, which is 119h by Monday 23:00.
+    # 144h clears that worst healthy week with margin; anything staler is a real gap
+    # (fix round 1, Ruling K).
+    max_delay_hours: 144
+  uniqueness:
+    combination: [asset, metric_date]
+  # No volume anomaly_threshold: the equity adapter ingests no volume, and a guard that
+  # is wired but dormant is the same failure as one that is unwired.

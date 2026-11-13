@@ -1,0 +1,54 @@
+# sector values must be one of the SECTORS tuple in cryptoval/config.py
+# consensus: pow | pos | other | na   (drives cost-of-production applicability)
+assets:
+  - {symbol: BTC,  cm_id: btc,     gecko_id: bitcoin,       sector: pow_monetary, consensus: pow, genesis_date: 2009-01-03}
+  - {symbol: LTC,  cm_id: ltc,     gecko_id: litecoin,      sector: pow_monetary, consensus: pow, genesis_date: 2011-10-07}
+  - {symbol: BCH,  cm_id: bch,     gecko_id: bitcoin-cash,  sector: pow_monetary, consensus: pow, genesis_date: 2017-08-01}
+  - {symbol: DOGE, cm_id: doge,    gecko_id: dogecoin,      sector: pow_monetary, consensus: pow, genesis_date: 2013-12-06}
+  - {symbol: ETH,  cm_id: eth,     gecko_id: ethereum,      sector: smart_contract_l1, consensus: pos,
+     defillama_slugs: [Ethereum], genesis_date: 2015-07-30}
+  - {symbol: ADA,  cm_id: ada,     gecko_id: cardano,       sector: smart_contract_l1, consensus: pos, genesis_date: 2017-09-29}
+  - {symbol: DOT,  cm_id: dot,     gecko_id: polkadot,      sector: smart_contract_l1, consensus: pos, genesis_date: 2020-05-26}
+  - {symbol: AVAX, cm_id: avaxc,   gecko_id: avalanche-2,   sector: smart_contract_l1, consensus: pos,
+     metric_sources: {volume: "cm:avax"},
+     coverage_note: "avaxc is the C-Chain and serves no reported spot volume; volume comes from cm:avax (spec 5.1)", genesis_date: 2020-09-21}
+  - {symbol: ALGO, cm_id: algo,    gecko_id: algorand,      sector: smart_contract_l1, consensus: pos}
+  - {symbol: TRX,  cm_id: trx,     gecko_id: tron,          sector: smart_contract_l1, consensus: pos,
+     metric_sources: {valuation: coingecko},
+     coverage_note: "cm:trx is real TRON but has no free market cap, MVRV or supply, so the cost family does not apply; trx_eth was a near-dead ERC-20 wrapper (spec 5.1)"}
+  - {symbol: ICP,  cm_id: icp,     gecko_id: internet-computer, sector: smart_contract_l1, consensus: pos, genesis_date: 2021-05-10}
+  - {symbol: POL,  cm_id: pol_eth, gecko_id: polygon-ecosystem-token, sector: scaling, consensus: pos,
+     coverage_note: "history starts 2023-10-25; the pre-rebrand MATIC series returns no data on the free tier, so no splice is possible (spec 5)"}
+  - {symbol: UNI,  cm_id: uni,     gecko_id: uniswap,       sector: defi, consensus: other,
+     defillama_slugs: ["Uniswap V4", "Uniswap V3", "Uniswap V2"], genesis_date: 2020-09-17}
+  - {symbol: AAVE, cm_id: aave,    gecko_id: aave,          sector: defi, consensus: other,
+     defillama_slugs: ["Aave V4", "Aave V3", "Aave V2"]}
+  - {symbol: CRV,  cm_id: crv,     gecko_id: curve-dao-token, sector: defi, consensus: other,
+     defillama_slugs: ["Curve DEX", "Curve LlamaLend V2"], genesis_date: 2020-08-13}
+  - {symbol: MKR,  cm_id: mkr,     gecko_id: maker,         sector: defi, consensus: other,
+     defillama_slugs: ["Sky Lending", "Sky Money"],
+     coverage_note: "rebranded: no protocol named Maker exists in the feed as of 2026-10-12"}
+  - {symbol: COMP, cm_id: comp,    gecko_id: compound-governance-token, sector: defi, consensus: other,
+     defillama_slugs: ["Compound V3", "Compound V2"], genesis_date: 2020-06-15}
+  - {symbol: SNX,  cm_id: snx,     gecko_id: havven,        sector: defi, consensus: other,
+     defillama_slugs: ["Synthetix V4", "Synthetix V3", "Synthetix v1+v2"]}
+  - {symbol: LDO,  cm_id: ldo,     gecko_id: lido-dao,      sector: defi, consensus: other,
+     defillama_slugs: [Lido]}
+  - {symbol: LINK, cm_id: link,    gecko_id: chainlink,     sector: oracle, consensus: other,
+     defillama_slugs: ["Chainlink Requests", "Chainlink Staking"]}
+  - {symbol: BNB,  cm_id: bnb,     gecko_id: binancecoin,   sector: exchange, consensus: other,
+     coverage_note: "market cap, MVRV and supply begin 2019-04-22 and are only 19% dense; density is a method precondition (spec 5)"}
+  - {symbol: MANA, cm_id: mana,    gecko_id: decentraland,  sector: metaverse, consensus: other}
+  - {symbol: USDC, cm_id: usdc,    gecko_id: usd-coin,      sector: stablecoin, consensus: na, is_stablecoin: true, genesis_date: 2018-09-26}
+  # Documented gap (spec section 5): SOL is absent from the Coin Metrics free tier.
+  - {symbol: SOL,  cm_id: null,    gecko_id: solana,        sector: smart_contract_l1, consensus: pos,
+     coverage_note: "absent from the Coin Metrics free tier (CapMrktCurUSD returns 403); CoinGecko price and market cap only (spec 5)", genesis_date: 2020-03-16}
+
+equities:
+  - {symbol: TSLA,  yahoo_id: TSLA}
+  - {symbol: AAPL,  yahoo_id: AAPL}
+  - {symbol: AMZN,  yahoo_id: AMZN}
+  - {symbol: GOOGL, yahoo_id: GOOGL}
+  - {symbol: META,  yahoo_id: META}
+  - {symbol: GOLD, yahoo_id: "GC=F"}
+  - {symbol: DXY,  yahoo_id: "DX-Y.NYB"}

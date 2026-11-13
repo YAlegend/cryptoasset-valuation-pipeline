@@ -1,0 +1,52 @@
+method_id: kampakis_log_linear_eoe
+family: A_monetary
+# velocity_total is market-cap-derived, so the registry flags this circular automatically.
+# market_cap_usd as a regressor against price is ALSO circular and the registry cannot see
+# it -- the method declares that itself. See the failure modes.
+requires: [price_usd, volume_total_usd, market_cap_usd, velocity_total, supply]
+min_density: 0.6
+min_rows: 365
+params: {fit_window_rows: 365, min_fit_rows: 180, published_beta: [0.88, 0.84, 1.15]}
+citation: "Kampakis et al. (2024), log-linear equation of exchange; spec 10.2"
+
+# Card prose (spec 12): the judgment that cannot be derived from the spec above.
+failure_modes:
+- 'THE THREE COEFFICIENTS ARE NOT ESTIMABLE ON THIS PANEL. velocity_total is defined as
+  volume_total_usd / market_cap_usd -- verified exact, maximum absolute difference 0.0 across every
+  asset -- so log(1/V) equals log(M) - log(T) identically and the design matrix has rank 3 for 4
+  columns. statsmodels returns a minimum-norm pseudo-inverse solution, which looks like an estimate
+  and is an artefact: ETH reads beta = (0.336, 0.670, 0.335), where the first and third are equal
+  and the second is their sum. Every row carries coefficients_identified=false and the measured
+  matrix rank and condition number (1.4e16). Do NOT compare these betas to the published triple.'
+- 'WHAT THE REGRESSION ACTUALLY FINDS IS THE DEFINITION OF PRICE. Only the combinations
+  gamma_T = beta_T - beta_invV and gamma_M = beta_M + beta_invV are identified, and on ETH they
+  read 0.0008 and 1.0050 with an intercept of -18.77, which is -log(supply). That is
+  price = market cap / supply recovered to three decimals, with volume contributing nothing. The
+  published fit implies gamma_T = -0.27 and gamma_M = 1.99, so it cannot have been run on data
+  where V is defined as T/M.'
+- 'The adjusted R-squared is 0.9999, not the published 0.97, for the same reason: an accounting
+  identity fits better than any empirical relationship. A HIGH R-squared here is evidence against
+  the method, not for it.'
+- 'CIRCULAR ON BOTH SIDES OF THE EQUATION. M is market cap, which IS price times supply, and V is
+  volume over market cap. So log(price) is regressed on two transforms of log(price).'
+- 'The registry''s automatic circularity flag does NOT catch the market-cap term: MARKET_CAP_DERIVED
+  lists columns derived FROM market cap, and market_cap_usd is deliberately excluded because
+  Metcalfe uses it as a regressand. Here it is a regressor against price, which the flag cannot
+  distinguish, so the method sets structurally_circular itself.'
+- 'The 1/V term is the inversion the holding-time correction invalidates (spec 10.2): measured on
+  this panel, H = 1/V understates holding time by 16-57% per asset.'
+- The equation of exchange presumes a medium of exchange; for a store-of-value asset the fit is
+  weakly identified, and USDC is the control case.
+- T is exchange volume, not on-chain settlement, and the two volume series differ by roughly 5x.
+- 'MEASURED ON ALL SIX ASSETS THAT CAN ANSWER (ADA, BCH, BTC, DOGE, ETH, LTC) on 2026-10-13, and
+  the result is identical for every one of them: beta = (0.336, 0.672, 0.335) -- the (1/3, 2/3,
+  1/3) minimum-norm signature, nowhere near the published (0.88, 0.84, 1.15); gamma_T between
+  -0.0036 and 0.0011; gamma_M between 1.0047 and 1.0285; adjusted R-squared between 0.99966 and
+  0.99999. Six assets agreeing to three decimals is not six confirmations of a law, it is six
+  measurements of the same accounting identity.'
+- 'Durbin-Watson reads 0.019 to 0.146 against a clean value of 2. Residuals that serially
+  correlated invalidate the standard errors and the confidence intervals reported beside each
+  beta, on top of the identification problem.'
+assumptions:
+- Re-estimated coefficients, never the published (0.88, 0.84, 1.15).
+- volume_total_usd stands in for T; market cap for M; velocity_total for V.

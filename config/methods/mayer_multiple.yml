@@ -1,0 +1,17 @@
+method_id: mayer_multiple
+family: E_cost
+requires: [price_usd]
+min_density: 0.9
+min_rows: 400
+params: {window_rows: 200, target_multiple: 1.0}
+citation: "Trace Mayer, Mayer multiple (200-day moving average)"
+failure_modes:
+- 'The purest form of the circularity this project exists to flag: fair value is a moving average OF
+  PRICE, so the method cannot disagree with price for long and its residual is a momentum signal,
+  not a valuation gap. Reported as a diagnostic.'
+- The 200-row window is a convention with no derivation behind it; target_multiple 1.0 is likewise
+  a choice, and the estimate scales linearly in it.
+- A 200-row window on a gapped series spans more than 200 calendar days, so the average is over a
+  longer stretch than its name claims.
+assumptions:
+- Price reverts to its own 200-row moving average.

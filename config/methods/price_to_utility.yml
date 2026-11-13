@@ -1,0 +1,23 @@
+method_id: price_to_utility
+family: D_multiples
+# velocity_total is market-cap-derived, so this method is flagged circular -- and it also
+# inverts velocity, which is the inversion the holding-time correction invalidates.
+requires: [price_usd, velocity_total, supply]
+min_density: 0.6
+min_rows: 730
+params:
+  staking_ratio: null    # the free tier serves none; supply one to enable the method
+  min_history_rows: 180
+citation: "dissertation section 3.6, price-to-utility ratio"
+
+# Card prose (spec 12): the judgment that cannot be derived from the spec above.
+failure_modes:
+- The staking ratio is an unverified input and the free tier serves none, so with staking_ratio null
+  the method refuses for every asset and names that reason - which is the honest answer, not a gap.
+- It inverts velocity, the inversion holding_time_correction shows to be biased by exp(sigma^2).
+- velocity_total is market-cap-derived, so this is a diagnostic rather than independent evidence of
+  value.
+assumptions:
+- A supplied staking_ratio is constant over the window and staked supply is genuinely unavailable for
+  transactional use.
+- 1 / velocity is a usable proxy for holding time, which is the assumption the correction method tests.

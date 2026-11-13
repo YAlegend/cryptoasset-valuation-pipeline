@@ -1,0 +1,22 @@
+method_id: nvm_ratio
+family: B_network
+requires: [market_cap_usd, active_addresses]
+min_density: 0.8
+min_rows: 365
+params: {fit_window_rows: 365, min_fit_rows: 180}
+returns_fair_value: false
+citation: "Network value to Metcalfe ratio (spec 10.3); the deviation series is the signal"
+failure_modes:
+- 'Two Metcalfe references live in this family and they do not agree: this method refits a
+  rolling 365-row log-log fit every row, while metcalfe_estimated uses an expanding window
+  refitted every 30 rows. A reader comparing the two is comparing reference lines, not assets.'
+
+- 'Returns NO fair value by declaration: NVM is network value divided by Metcalfe-implied value, so
+  publishing it as a price would be publishing the Metcalfe fit twice.'
+- It inherits the Metcalfe fit''s autocorrelated residuals wholesale, so a deviation is only as
+  meaningful as that fit.
+- The level of NVM is not comparable across assets; only its deviation from its own history is.
+- The Metcalfe reference is fitted on the PRIOR window only, so today's market cap never enters the
+  line it is measured against.
+assumptions:
+- The Metcalfe fit on the trailing window is the right reference for today's network value.

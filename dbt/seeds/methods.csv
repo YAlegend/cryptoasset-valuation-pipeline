@@ -1,0 +1,42 @@
+method_id,family,requires,min_density,min_rows,citation,returns_fair_value
+active_price,E_cost,realized_cap|active_supply,0.5,30,Cointime Economics (Puell and Check): active price,true
+aviv,E_cost,market_cap_usd|liveliness|investor_cap_usd,0.5,30,Cointime Economics (Puell and Check): active value to investor value,false
+bond_target_yield,C_cashflow,total_fees_usd|supply|price_usd,0.5,180,"Spec 10.4, bond-style target yield = annual fees / (risk free + staking premium)",true
+crypto_qtm,A_monetary,volume_total_usd|supply|price_usd,0.6,180,"dissertation section 3.1, crypto quantity theory of money",true
+crypto_qtm_panel_velocity,A_monetary,volume_total_usd|supply|price_usd|velocity_total,0.6,180,dissertation section 3.1 as literally specified; retained to measure the circularity,true
+defi_net_revenue_dcf,C_cashflow,net_revenue_usd|revenue_regime|supply|price_usd,0.5,180,"Spec 10.4, DeFi net-revenue DCF - the retained share, never gross fees",true
+dfdv_to_revenue,D_multiples,price_usd|supply|total_supply|net_revenue_usd,0.5,365,"dFDV, spec 10.4 - a haircut on locked supply rather than naive full dilution",true
+emissions_adjusted_real_yield,C_cashflow,total_fees_usd|issuance_usd|market_cap_usd,0.5,365,"Spec 10.4, emissions-adjusted real yield",false
+energy_value,E_cost,hash_rate|issuance_usd|price_usd,0.9,400,"Charles Edwards / Capriole (2019), energy value",true
+eth_three_stage_dcf,C_cashflow,net_revenue_usd|issuance_usd|supply|price_usd,0.5,365,"Spec 10.4, ETH three-stage DCF; discount rate decomposed per spec 10.4",true
+fdv_to_revenue,D_multiples,price_usd|max_supply|net_revenue_usd,0.5,365,"FDV/revenue, spec 10.5; FDV assumes full dilution at today's price",true
+hayes_cost_of_production,E_cost,hash_rate|issuance_usd|price_usd,0.9,180,"Hayes (2017), cost of production model; dissertation section 3.4",true
+holding_time_correction,A_monetary,velocity_total,0.6,365,Kampakis et al. (2024); corrects dissertation sections 3.1 and 3.6,false
+investor_cap_price,E_cost,investor_cap_usd|supply,0.5,30,"dissertation section 3.5, investor capitalisation",true
+j_curve,A_monetary,volume_total_usd|supply|price_usd,0.6,180,"Burniske (2017), crypto J-curve; dissertation section 3.2",true
+kampakis_log_linear_eoe,A_monetary,price_usd|volume_total_usd|market_cap_usd|velocity_total|supply,0.6,365,"Kampakis et al. (2024), log-linear equation of exchange; spec 10.2",true
+lppls_bubble_flag,B_network,price_usd,0.9,500,Sornette LPPLS; Wheatley et al. (2018) applied to cryptoassets (spec 10.3),false
+mayer_multiple,E_cost,price_usd,0.9,400,"Trace Mayer, Mayer multiple (200-day moving average)",true
+metcalfe_estimated,B_network,market_cap_usd|active_addresses|supply,0.6,365,"Metcalfe (1995); Alabi (2017); Peterson (2018). beta estimated, never assumed to be 2.0",true
+mvrv_reversion,E_cost,realized_cap|mvrv|supply,0.5,365,"Murad Mahmudov & David Puell (2018), MVRV",true
+mvrv_z_score,E_cost,market_cap_usd|realized_cap|supply,0.8,730,"Awe and Wonder / Murad Mahmudov, MVRV Z-score; dissertation section 3.5",true
+mvtv_reversion,E_cost,thermocap_usd|mvtv|supply,0.5,365,"dissertation section 3.5, market-value-to-thermocap",true
+nvm_ratio,B_network,market_cap_usd|active_addresses,0.8,365,Network value to Metcalfe ratio (spec 10.3); the deviation series is the signal,false
+nvt_golden_ratio,D_multiples,market_cap_usd|volume_total_usd|supply,0.6,1095,"Dmitry Kalichkin (2018), NVT golden ratio",true
+nvt_reversion,D_multiples,market_cap_usd|volume_total_usd|supply,0.6,365,"Willy Woo / Chris Burniske (2017), NVT ratio; dissertation section 3.6",true
+peterson_metcalfe,B_network,market_cap_usd|active_addresses|supply,0.8,365,"Timothy Peterson (2018), Metcalfe's law as a model for Bitcoin's value; dissertation 3.3",true
+power_law,F_shelf,price_usd|genesis_date,0.9,730,Santostasi power law; contested - see the 2026 nine-objections paper (spec 10.7),true
+price_to_fees,D_multiples,price_usd|supply|total_fees_usd,0.5,365,"P/F, spec 10.5; denominator discipline per spec 10.4",true
+price_to_sales,D_multiples,price_usd|supply|net_revenue_usd,0.5,365,"P/S on NET protocol revenue, spec 10.4-10.5",true
+price_to_tvl,D_multiples,price_usd|supply|tvl_usd,0.5,365,"P/TVL, spec 10.5",true
+price_to_utility,D_multiples,price_usd|velocity_total|supply,0.6,730,"dissertation section 3.6, price-to-utility ratio",true
+puell_multiple,E_cost,issuance_usd|price_usd,0.9,730,"David Puell (2019), Puell multiple; spec 6.2 derives it from free inputs",true
+realized_price,E_cost,realized_cap|supply,0.5,30,"Coinmetrics (2018), realized capitalisation; dissertation section 3.5",true
+rpv,E_cost,realized_profit_usd|market_cap_usd,0.5,30,"Dissertation 6.1, realised profits-to-value ratio",false
+sector_cohort_zscore,D_multiples,market_cap_usd|net_revenue_usd|sector,0.3,1,Sector-cohorted relative valuation (spec 10.5),false
+slrv,E_cost,hodl_rc_0d|hodl_rc_6m_1y,0.5,30,"Dissertation 5.5, short-to-long-term realised value ratio",false
+sthpl,E_cost,price_usd|sth_realized_cap|sth_supply,0.5,30,"Dissertation 6.2, short-term-holder profit/loss (computed as STH-MVRV, Plan 3b Ruling 3)",false
+stock_to_flow,F_shelf,market_cap_usd|supply|issuance_usd|price_usd,0.9,730,"PlanB (2019), Modeling Bitcoin Value with Scarcity; falsified post-2021",true
+supply_effect_counter_model,C_cashflow,market_cap_usd|supply|price_usd,0.5,365,"Spec 10.4's counter-model: fee burn and staking yield change the SUPPLY PATH, not value",true
+thermocap_floor,E_cost,thermocap_usd|supply,0.5,30,Nick Carter / Coinmetrics thermocap; dissertation section 3.5,true
+true_market_mean,E_cost,investor_cap_usd|active_supply,0.5,30,Cointime Economics (Puell and Check): true market mean price,true

@@ -1,0 +1,13 @@
+method_id: true_market_mean
+family: E_cost
+requires: [investor_cap_usd, active_supply]
+min_density: 0.5
+min_rows: 30
+params: {}
+citation: "Cointime Economics (Puell and Check): true market mean price"
+
+failure_modes:
+- Inherits the MVRV identity's fragility (spec 6.2) through investor cap.
+- Refuses on any day investor cap is not positive.
+assumptions:
+- Investor cap (realized cap minus thermocap) is the capital investors, not miners, put in.

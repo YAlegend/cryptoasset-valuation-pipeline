@@ -1,0 +1,17 @@
+method_id: sthpl
+family: E_cost
+requires: [price_usd, sth_realized_cap, sth_supply]
+min_density: 0.5
+min_rows: 30
+returns_fair_value: false
+params: {}
+citation: "Dissertation 6.2, short-term-holder profit/loss (computed as STH-MVRV, Plan 3b Ruling 3)"
+
+failure_modes:
+- 'The dissertation''s literal STH P/L over LTH P/L is undefined when LTH P/L crosses zero; this is
+  price over the realized price of coins younger than 155 days, which matches its own reading that
+  unity is breakeven.'
+assumptions:
+- A coin's age is days since the output was created; 155 days separates short- from long-term holders.
+  The cutoff is fixed in cryptoval/utxo/derive.py (STH_DAYS), where the cohort is built, not a
+  parameter of this ratio.

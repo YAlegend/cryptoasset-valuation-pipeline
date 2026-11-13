@@ -1,0 +1,18 @@
+# Spec 11.5 on the Coin Metrics community universe (design 2026-10-21-factor-models).
+# Exclusions depend on what a listing IS, never on how it performed.
+min_market_cap_usd: 1000000   # Liu-Tsyvinski-Wu's floor
+min_assets: 50                # first met 2017-12-24 after exclusions, about 5 per decile
+momentum_weeks: 3
+newey_west_lags: 4
+winsor_quantile: 0.05         # Fama-MacBeth only
+deciles: 10
+tail_share: 0.3               # LTW 30/40/30 legs
+spike_ratio: 5                # a Sunday price 5x both neighbours (or 1/5) is a vendor spike
+exclude:
+  pegged: [usdt, usdt_omni, usdt_eth, usdt_trx, usdt_avaxc, tusd, tusd_eth, tusd_trx, gusd,
+           usdc, usdc_eth, usdc_trx, usdc_avaxc, pax, busd, husd, dai, sai, usdk, frax_eth,
+           lusd_eth, usdd_eth, eurc_eth, fdusd_eth, pyusd_eth, crvusd_eth, usde_eth, susde_eth,
+           usdm_eth, sdai_eth, buidl_eth, xaut, paxg]
+  wrapper: [wbtc, weth, renbtc, hbtc, wnxm]
+  # the same token on another chain: one listing kept (avaxp, leo_eth, bnb, flow_native)
+  other_chain: [avaxc, avaxx, leo_eos, bnb_eth, flow]

@@ -1,0 +1,18 @@
+method_id: nvt_golden_ratio
+family: D_multiples
+requires: [market_cap_usd, volume_total_usd, supply]
+min_density: 0.6
+min_rows: 1095          # two years of moving average plus a year to use it
+params: {volume_column: volume_total_usd, ma_rows: 730}
+citation: "Dmitry Kalichkin (2018), NVT golden ratio"
+
+# Card prose (spec 12): the judgment that cannot be derived from the spec above.
+failure_modes:
+- min_rows is 1,095 - a 730-row moving average plus a year to use it - which exceeds free-tier history
+  for most of the universe, so most assets refuse. That wall of refusals is the measurement, not a bug.
+- The 730-day mean carries two years of a different liquidity regime into today's signal.
+- 'Same volume-definition objection as nvt_reversion: read inputs_used.volume_column.'
+assumptions:
+- A 730-row trailing mean of NVT is the right normaliser (Kalichkin's own choice), and the ratio of
+  today's NVT to it is comparable across assets.
+- volume_total_usd is the transaction proxy.

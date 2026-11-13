@@ -1,0 +1,17 @@
+cryptoval:
+  target: duckdb
+  outputs:
+    duckdb:
+      type: duckdb
+      # Absolute when set: dbt runs from dbt/, so a relative root would resolve there.
+      path: "{{ env_var('CRYPTOVAL_DATA_ROOT', '../data') }}/cryptoval.duckdb"
+      threads: 4
+    # Plan 5 switches to this target without changing any model SQL.
+    bigquery:
+      type: bigquery
+      method: oauth
+      project: "{{ env_var('GCP_PROJECT', 'not-set') }}"
+      dataset: cryptoval
+      location: US
+      threads: 4
+      priority: interactive

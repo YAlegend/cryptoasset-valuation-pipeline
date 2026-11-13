@@ -1,0 +1,42 @@
+name: cryptoval
+version: "0.1.0"
+config-version: 2
+profile: cryptoval
+model-paths: ["models"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+vars:
+  data_root: "{{ env_var('CRYPTOVAL_DATA_ROOT', '../data') }}"
+  bitcoin_genesis: "2009-01-03"
+
+models:
+  cryptoval:
+    staging:
+      +materialized: view
+    marts:
+      +materialized: table
+
+seeds:
+  cryptoval:
+    +schema: main
+    assets:
+      +column_types:
+        symbol: varchar
+        is_stablecoin: boolean
+        is_equity: boolean
+        genesis_date: date
+    asset_metric_sources:
+      +column_types:
+        symbol: varchar
+        metric_group: varchar
+        source_kind: varchar
+        source_id: varchar
+    methods:
+      +column_types:
+        method_id: varchar
+        family: varchar
+        requires: varchar
+        min_density: double
+        min_rows: integer
+        returns_fair_value: boolean
