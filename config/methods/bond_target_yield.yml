@@ -1,0 +1,25 @@
+method_id: bond_target_yield
+family: C_cashflow
+requires: [total_fees_usd, supply, price_usd]
+min_density: 0.5
+min_rows: 180
+params:
+  window_rows: 365
+  # Spec 10.4 requires both to be EXPLICIT parameters rather than fitted.
+  risk_free_rate: 0.04
+  staking_risk_premium: 0.06
+  denominator: total_fees_usd
+citation: "Spec 10.4, bond-style target yield = annual fees / (risk free + staking premium)"
+
+failure_modes:
+- 'A perpetuity with no growth term: value = annual fees / target yield assumes this year''s fees
+  forever, which is neither a forecast nor a floor.'
+- 'Both rate components are parameters set by hand. The risk-free rate is not read from a treasury
+  series (the free tier here serves gold and the dollar index, not the 10-year), so it is as of
+  whenever it was last edited - the value travels on every row for that reason.'
+- 'GROSS fees, unlike the two DCFs: this method values the whole fee stream regardless of who
+  receives it, so for a protocol that routes most fees to liquidity providers it answers a
+  question about the protocol rather than about the token.'
+- The staking risk premium is the entire judgement of the method compressed into one number.
+assumptions:
+- Fee revenue is perpetual and flat, and 10% is the yield such a claim should offer.

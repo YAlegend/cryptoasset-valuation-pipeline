@@ -1,0 +1,5 @@
+model_id: ridge
+family: linear
+params:
+  alpha: 1.0
+citation: "Spec 11.3, ridge regression"

@@ -1,0 +1,5 @@
+model_id: naive_persistence
+family: baseline
+uses_features: false
+params: {}
+citation: "Spec 11.1, naive persistence: the random walk's forecast of a future log return is zero"

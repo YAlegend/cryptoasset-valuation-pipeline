@@ -1,0 +1,5 @@
+model_id: historical_mean
+family: baseline
+uses_features: false
+params: {}
+citation: "Spec 11.1, historical mean of the h-horizon log return over the training fold"

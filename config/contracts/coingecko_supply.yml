@@ -1,0 +1,37 @@
+contract:
+  name: coingecko_supply
+  version: "1.0.0"
+  owner: yasir
+  source_url: https://api.coingecko.com/api/v3
+
+schema:
+  # Only the key is required: required columns also fail on a single null (see the loader),
+  # and CoinGecko legitimately leaves total_supply or circulating_supply null for the odd
+  # asset. The rate ceilings below are the availability detector instead.
+  required:
+    - gecko_id
+  columns:
+    gecko_id: {type: string}
+    # Measured 2026-10-14 against all 24 configured gecko_ids in one /coins/markets call:
+    # circulating_supply 0/24 null, total_supply 0/24, max_supply 9/24 (37.5%),
+    # fully_diluted_valuation 0/24. The ceilings leave headroom (0.60 against 37.5% on
+    # max_supply, 0.10 against 0% elsewhere; one asset is 4.2 points of a 24-row table) and exist to catch a column going WHOLLY null,
+    # or a response that silently lost a field; they are not a statement of how many
+    # assets "should" lack a maximum. Raise only with a new measurement.
+    circulating_supply: {type: float, minimum: 0, max_null_fraction: 0.10}      # live 0%
+    total_supply: {type: float, minimum: 0, max_null_fraction: 0.10}            # live 0%
+    # A high rate is correct here: ETH, SOL, DOGE, TRX and others have no cap, and a null
+    # max_supply must stay null (an FDV multiple does not exist for them).
+    max_supply: {type: float, minimum: 0, max_null_fraction: 0.60}              # live 37.5%
+    fully_diluted_valuation: {type: float, minimum: 0, max_null_fraction: 0.10} # live 0%
+
+quality:
+  # No freshness block: the table has no metric_date. It is a point-in-time snapshot whose
+  # capture instant is SCD2's effective_start_ts, and a stale snapshot is visible there.
+  uniqueness:
+    combination: [gecko_id]
+  notes: |
+    One current row per gecko_id: the free tier serves current supply figures, not history.
+    There is deliberately no as-of column in this table (it would be hashed into row_hash
+    and re-version every asset on every run); stg_supply_metadata derives supply_as_of from
+    effective_start_ts, i.e. the date these values were first observed.

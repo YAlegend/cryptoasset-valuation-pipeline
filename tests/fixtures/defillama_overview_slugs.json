@@ -1,0 +1,44 @@
+{
+ "protocols": [
+  {
+   "name": "Sky Lending",
+   "slug": "sky-lending",
+   "total24h": 968486,
+   "total30d": 27455836,
+   "methodology": {
+    "UserFees": "Interest paid to borrow",
+    "Fees": "Stability fees charged on DAI/USDS loans, liquidation income from collateral auctions, and PSM (Peg Stability Module) fees from USDC/DAI conversions",
+    "Revenue": "Fees collected minus savings rate paid to DSR depositors",
+    "ProtocolRevenue": "Net protocol revenue after subtracting SKY token buybacks",
+    "HoldersRevenue": "SKY token buybacks + staking rewards for sky stakers",
+    "SupplySideRevenue": "DAI/USDS paid to DSR depositors"
+   }
+  },
+  {
+   "name": "Aave V3",
+   "slug": "aave-v3",
+   "total24h": 1131614,
+   "total30d": 37166865,
+   "methodology": {
+    "UserFees": "Interest paid by borrowers",
+    "Fees": "Include borrow interest, flashloan fee, liquidation fee, penalty paid by borrowers, swap fees from Paraswap, and Chainlink SVR (MEV recapture from Ethereum liquidations).",
+    "Revenue": "Amount of fees go to Aave treasury.",
+    "ProtocolRevenue": "Amount of fees go to Aave treasury.",
+    "SupplySideRevenue": "Amount of fees distributed to suppliers.",
+    "HoldersRevenue": "Aave starts buy back AAVE tokens using Aave Treasury after 9th April 2025."
+   }
+  },
+  {
+   "name": "Ethereum",
+   "slug": "ethereum",
+   "total24h": 354748,
+   "total30d": 18241068,
+   "methodology": {
+    "UserFees": "Gas fees paid by users",
+    "Fees": "Total ETH gas fees (base fees + priority fees) plus blob fees (post-EIP-4844, type-3 blob-carrying transactions) paid by users",
+    "Revenue": "Amount of ETH burned \u2014 base fees plus blob fees (both are permanently burned, accruing to no proposer)",
+    "HoldersRevenue": "Amount of ETH burned \u2014 base fees plus blob fees"
+   }
+  }
+ ]
+}

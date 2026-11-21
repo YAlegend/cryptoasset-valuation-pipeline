@@ -1,0 +1,5 @@
+model_id: random_walk_drift
+family: baseline
+uses_features: false
+params: {}
+citation: "Spec 11.1, random walk with drift: the mean one-day log return, scaled by the horizon"

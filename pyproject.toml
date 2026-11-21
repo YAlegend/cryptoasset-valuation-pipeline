@@ -1,0 +1,22 @@
+[project]
+name = "cryptoval"
+version = "0.1.0"
+requires-python = ">=3.14"
+description = "Cryptoasset valuation data platform"
+
+[tool.setuptools.packages.find]
+include = ["cryptoval*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not integration' --strict-markers"
+markers = [
+    "integration: hits live network APIs; excluded from the default run",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
