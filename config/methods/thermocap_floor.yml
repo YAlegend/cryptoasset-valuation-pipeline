@@ -1,0 +1,18 @@
+method_id: thermocap_floor
+family: E_cost
+requires: [thermocap_usd, supply]
+min_density: 0.5
+min_rows: 30
+params: {}
+citation: "Nick Carter / Coinmetrics thermocap; dissertation section 3.5"
+
+# Card prose (spec 12): the judgment that cannot be derived from the spec above.
+failure_modes:
+- thermocap_has_gap means cumulative issuance value is understated, so the floor reads too low and anything
+  built on it reads too high.
+- Thermocap counts issuance paid to miners and not fees, so a fee-heavy chain's security spend is understated.
+- ETH's issuance changes meaning at the Merge, so a floor spanning that date averages two regimes.
+assumptions:
+- Cumulative miner revenue is a lower bound on the capital that had to be spent to bring the supply
+  into existence.
+- Security spend is a proxy for value, which is an argument about cost and not about demand.

@@ -1,0 +1,31 @@
+contract:
+  name: defillama_tvl
+  version: "1.0.0"
+  owner: yasir
+  source_url: https://api.llama.fi
+
+schema:
+  required:
+    - protocol
+    - metric_date
+    - tvl_usd
+  columns:
+    protocol: {type: string}
+    metric_date: {type: date}
+    # TVL is a stock, not a flow: it cannot be negative, and a null means the vendor served
+    # no point for that day rather than "nothing was locked". The ceiling guards a vendor
+    # rescale (a units change would show up as a jump of several orders of magnitude);
+    # DefiLlama's whole-market TVL is ~1e12, so a single protocol above that is not real.
+    tvl_usd: {type: float, minimum: 0, maximum: 1.0e+12, max_null_fraction: 0.02}
+
+quality:
+  freshness:
+    max_delay_hours: 72
+  uniqueness:
+    combination: [protocol, metric_date]
+  notes: |
+    One row per protocol per DAY of history, from /protocol/{slug}. A separate contract
+    from defillama_history.yml because the grain differs in what it measures, not in its
+    keys: fees are a daily flow, TVL is the balance at the end of the day. The current UTC
+    date is absent by construction -- the vendor's array carries both today's 00:00 point
+    and a live "now" point, which normalise to the same date.

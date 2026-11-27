@@ -1,0 +1,41 @@
+contract:
+  name: defillama_fees
+  version: "1.1.0"
+  owner: yasir
+  source_url: https://api.llama.fi
+
+schema:
+  # total_fees_24h is NOT required: 383 of 2,991 listed protocols report no 24h fees
+  # (fix round 1, Ruling H). A negative GROSS fee still fails the range bound below and
+  # is quarantined (spec 9.1): fees collected cannot be negative, so those rows are
+  # vendor errors. Negative NET revenue is a different thing entirely -- see below.
+  required:
+    - protocol
+  columns:
+    protocol: {type: string}
+    total_fees_24h: {type: float, minimum: 0, max_null_fraction: 0.35}   # live 12.8%
+    total_fees_30d: {type: float, minimum: 0, max_null_fraction: 0.35}   # live 11.0%
+    # NO minimum, deliberately (spec 9.2, corrected 2026-10-12). Net revenue is what the
+    # protocol retains after payouts and incentives, and it goes negative for real
+    # economic reasons: insurance paying claims above premiums (Ensuro), options writers
+    # losing (Hegic), a betting protocol's house losing (WINR, Azuro, DoubleUp), and
+    # rebate structures (Fragment: $1.05M fees, -$852K net revenue). The original
+    # minimum: 0 was blocking the build on 24 protocols for being honest.
+    net_revenue_24h: {type: float, max_null_fraction: 0.45}              # live 21.8%
+    methodology_hash: {type: string}
+
+quality:
+  uniqueness:
+    # The snapshot is per-day (metric_date = the run's end date) and silver accumulates
+    # them, so a protocol-only key reports every protocol as a duplicate from the second
+    # calendar day of operation. It must match the SCD2 key.
+    combination: [protocol, metric_date]
+  volume:
+    anomaly_threshold: 5.0       # |x - trailing mean| / trailing mean = +500%: a spike detector, not volatility (spec 9.2)
+  notes: |
+    methodology_hash fingerprints DefiLlama's own per-protocol methodology
+    text. A change to it means the revenue series has been redefined and the
+    history is no longer comparable (spec section 9.2).
+    This is a text fingerprint, not a definition fingerprint: it covers only the
+    free-text methodology field, so a change to DefiLlama's underlying computation,
+    methodologyURL or revenue breakdown fields is not detected by it.

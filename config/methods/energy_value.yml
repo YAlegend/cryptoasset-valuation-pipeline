@@ -1,0 +1,22 @@
+method_id: energy_value
+family: E_cost
+requires: [hash_rate, issuance_usd, price_usd]
+min_density: 0.9
+min_rows: 400
+params:
+  window_rows: 365
+  joules_per_hash: 2.0e-11
+  electricity_usd_per_kwh: 0.05
+  hashes_per_unit: 1.0e+12
+citation: "Charles Edwards / Capriole (2019), energy value"
+failure_modes:
+- 'NOT INDEPENDENT OF HAYES. Energy value is 2 x the trailing-year mean of exactly the Hayes cost
+  per coin this repo already computes, and it is implemented by calling that function. Treat the
+  two as one piece of evidence; counting them twice in a composite manufactures agreement.'
+- The factor of two is Capriole's assumption about the ratio of value to energy input, not a
+  measurement, and the estimate scales linearly in it.
+- It inherits every Hayes failure mode - the efficiency and electricity-price parameters, the
+  calibrated hash-rate unit, and proof-of-work only.
+assumptions:
+- Value is twice the energy cost of issuance, averaged over a trailing year.
+- The same fleet efficiency and electricity price as hayes_cost_of_production.

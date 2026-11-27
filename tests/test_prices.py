@@ -1,0 +1,488 @@
+import datetime as dt
+import time
+
+import httpx
+import numpy as np
+import pandas as pd
+import pytest
+import yfinance
+
+from cryptoval.config import Asset
+from cryptoval.scd2 import merge_scd2
+from cryptoval.sources.prices import (
+    CoinGeckoSource,
+    CoinGeckoSupplySource,
+    EquitySource,
+    compute_velocity,
+    parse_market_chart,
+    parse_supply_metadata,
+)
+
+PANEL = ["asset", "metric_date", "price_usd", "market_cap_usd", "volume_usd"]
+
+
+def test_parses_three_series_into_one_panel(load_fixture):
+    df = parse_market_chart(load_fixture("coingecko_btc_market_chart.json"), "bitcoin")
+    assert len(df) == 3
+    assert list(df.columns) == PANEL
+
+
+def test_asset_is_the_gecko_id(load_fixture):
+    df = parse_market_chart(load_fixture("coingecko_btc_market_chart.json"), "bitcoin")
+    assert set(df["asset"]) == {"bitcoin"}
+
+
+def test_epoch_millis_become_utc_dates(load_fixture):
+    df = parse_market_chart(load_fixture("coingecko_btc_market_chart.json"), "bitcoin")
+    assert str(df["metric_date"].dt.tz) == "UTC"
+    assert (df["metric_date"] == df["metric_date"].dt.normalize()).all()
+
+
+def test_values_align_across_the_three_series(load_fixture):
+    df = parse_market_chart(load_fixture("coingecko_btc_market_chart.json"), "bitcoin")
+    first = df.sort_values("metric_date").iloc[0]
+    assert first["price_usd"] == pytest.approx(85540.08)
+    assert first["market_cap_usd"] == pytest.approx(1.71888314248e12)
+    assert first["volume_usd"] == pytest.approx(4.5e10)
+
+
+def test_velocity_is_volume_over_market_cap():
+    df = pd.DataFrame({"market_cap_usd": [1000.0], "volume_usd": [50.0]})
+    out = compute_velocity(df)
+    assert out["velocity"].iloc[0] == pytest.approx(0.05)
+    assert out["holding_time_days"].iloc[0] == pytest.approx(20.0)
+
+
+def test_zero_market_cap_gives_nan_velocity_not_inf():
+    df = pd.DataFrame({"market_cap_usd": [0.0], "volume_usd": [50.0]})
+    out = compute_velocity(df)
+    assert np.isnan(out["velocity"].iloc[0])
+
+
+def test_zero_volume_gives_nan_holding_time_not_inf():
+    df = pd.DataFrame({"market_cap_usd": [1000.0], "volume_usd": [0.0]})
+    out = compute_velocity(df)
+    assert np.isnan(out["holding_time_days"].iloc[0])
+
+
+def test_source_metadata():
+    assert CoinGeckoSource().name == "coingecko"
+    assert CoinGeckoSource().contract_path.endswith("coingecko_market_chart.yml")
+    assert EquitySource().name == "equities"
+
+
+# ---- CoinGeckoSource.fetch ------------------------------------------------
+
+START = dt.date(2026, 10, 1)
+END = dt.date(2026, 10, 3)
+
+
+def _asset(symbol: str, gecko_id: str | None) -> Asset:
+    return Asset(symbol=symbol, gecko_id=gecko_id)
+
+
+def _client(handler, requests: list[httpx.Request]) -> httpx.Client:
+    def recording(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return handler(request)
+
+    return httpx.Client(transport=httpx.MockTransport(recording))
+
+
+@pytest.fixture
+def sleeps(monkeypatch):
+    calls: list[float] = []
+    monkeypatch.setattr(time, "sleep", calls.append)
+    return calls
+
+
+def test_fetch_skips_assets_without_gecko_id_and_makes_no_request(load_fixture, sleeps):
+    requests: list[httpx.Request] = []
+    client = _client(
+        lambda r: httpx.Response(200, json=load_fixture("coingecko_btc_market_chart.json")),
+        requests,
+    )
+    result = CoinGeckoSource().fetch(START, END, [_asset("XXX", None)], client)
+    assert len(requests) == 0
+    assert sleeps == []
+    assert result.rows_in == 0
+    assert result.frame.empty
+    assert list(result.frame.columns) == PANEL
+
+
+def test_fetch_two_assets_makes_two_requests_and_returns_both(load_fixture, sleeps):
+    requests: list[httpx.Request] = []
+    client = _client(
+        lambda r: httpx.Response(200, json=load_fixture("coingecko_btc_market_chart.json")),
+        requests,
+    )
+    assets = [_asset("BTC", "bitcoin"), _asset("SOL", None), _asset("ETH", "ethereum")]
+    result = CoinGeckoSource(sleep_between_assets_s=7.0).fetch(START, END, assets, client)
+    assert len(requests) == 2
+    assert [r.url.path for r in requests] == [
+        "/api/v3/coins/bitcoin/market_chart/range",
+        "/api/v3/coins/ethereum/market_chart/range",
+    ]
+    assert set(result.frame["asset"]) == {"bitcoin", "ethereum"}
+    assert len(result.frame) == 6
+    assert result.rows_in == 6
+    assert sleeps == [7.0, 7.0]
+    assert "velocity" in result.frame.columns
+    assert "holding_time_days" in result.frame.columns
+
+
+def test_fetch_sends_utc_epoch_second_bounds(load_fixture, sleeps):
+    requests: list[httpx.Request] = []
+    client = _client(
+        lambda r: httpx.Response(200, json=load_fixture("coingecko_btc_market_chart.json")),
+        requests,
+    )
+    CoinGeckoSource().fetch(START, END, [_asset("BTC", "bitcoin")], client)
+    params = requests[0].url.params
+    assert params["vs_currency"] == "usd"
+    assert params["from"] == str(int(dt.datetime(2026, 10, 1, tzinfo=dt.UTC).timestamp()))
+    assert params["from"] == "1790812800"
+    # end of the end day, inclusive
+    assert params["to"] == str(int(dt.datetime(2026, 10, 3, 23, 59, 59, tzinfo=dt.UTC).timestamp()))
+    assert params["to"] == "1791071999"
+
+
+def test_fetch_retries_429_then_succeeds_with_pinned_sleeps(load_fixture, sleeps):
+    requests: list[httpx.Request] = []
+    responses = iter(
+        [
+            httpx.Response(429),
+            httpx.Response(200, json=load_fixture("coingecko_btc_market_chart.json")),
+        ]
+    )
+    client = _client(lambda r: next(responses), requests)
+    result = CoinGeckoSource(sleep_between_assets_s=7.0).fetch(
+        START, END, [_asset("BTC", "bitcoin")], client
+    )
+    assert len(requests) == 2
+    # 2.0s retry backoff, then the 7.0s inter-asset pause
+    assert sleeps == [2.0, 7.0]
+    assert len(result.frame) == 3
+
+
+def test_fetch_raises_after_exhausting_retries_on_429(sleeps):
+    requests: list[httpx.Request] = []
+    client = _client(lambda r: httpx.Response(429), requests)
+    with pytest.raises(httpx.HTTPStatusError):
+        CoinGeckoSource(max_retries=3).fetch(START, END, [_asset("BTC", "bitcoin")], client)
+    assert len(requests) == 3
+    assert sleeps == [2.0, 4.0]
+
+
+# ---- EquitySource.fetch ---------------------------------------------------
+
+
+def _equity(symbol: str, yahoo_id: str | None, is_equity: bool = True) -> Asset:
+    return Asset(symbol=symbol, yahoo_id=yahoo_id, is_equity=is_equity)
+
+
+def _yf_frame() -> pd.DataFrame:
+    index = pd.DatetimeIndex(["2026-10-01", "2026-10-02", "2026-10-05"], name="Date")
+    columns = pd.MultiIndex.from_product(
+        [["Close", "Volume"], ["AAPL", "SPY"]], names=["Price", "Ticker"]
+    )
+    data = [
+        [250.0, 600.0, 1e6, 2e6],
+        [np.nan, 605.5, 1e6, 2e6],
+        [252.5, 607.0, 1e6, 2e6],
+    ]
+    return pd.DataFrame(data, index=index, columns=columns)
+
+
+def test_equity_fetch_tidies_closes_and_drops_null_closes(monkeypatch):
+    calls: list[dict] = []
+
+    def fake_download(tickers, **kwargs):
+        calls.append({"tickers": tickers, **kwargs})
+        return _yf_frame()
+
+    monkeypatch.setattr(yfinance, "download", fake_download)
+    assets = [
+        _equity("AAPL", "AAPL"),
+        _equity("SPY", "SPY"),
+        _equity("BTC", None, is_equity=False),
+        _equity("NOYAHOO", None),
+    ]
+    result = EquitySource().fetch(START, END, assets, client=None)
+
+    assert len(calls) == 1
+    assert calls[0]["tickers"] == ["AAPL", "SPY"]
+    frame = result.frame
+    assert list(frame.columns) == PANEL
+    assert str(frame["metric_date"].dt.tz) == "UTC"
+    assert (frame["metric_date"] == frame["metric_date"].dt.normalize()).all()
+    # 3 dates x 2 tickers = 6, minus the single null AAPL close
+    assert len(frame) == 5
+    assert result.rows_in == 5
+    assert frame["price_usd"].notna().all()
+    assert set(frame["asset"]) == {"AAPL", "SPY"}
+    aapl = frame[frame["asset"] == "AAPL"].sort_values("metric_date")
+    assert aapl["price_usd"].tolist() == [250.0, 252.5]
+    assert pd.Timestamp("2026-10-02", tz="UTC") not in set(aapl["metric_date"])
+    spy = frame[frame["asset"] == "SPY"].sort_values("metric_date")
+    assert spy["price_usd"].tolist() == [600.0, 605.5, 607.0]
+    assert frame["market_cap_usd"].isna().all()
+    assert frame["volume_usd"].isna().all()
+
+
+def test_equity_fetch_with_no_tickers_returns_empty_frame_without_download(monkeypatch):
+    def boom(*args, **kwargs):
+        raise AssertionError("yfinance.download must not be called")
+
+    monkeypatch.setattr(yfinance, "download", boom)
+    result = EquitySource().fetch(START, END, [_equity("BTC", None, is_equity=False)], client=None)
+    assert result.rows_in == 0
+    assert result.frame.empty
+    assert list(result.frame.columns) == PANEL
+
+
+def test_negative_market_cap_gives_nan_velocity():
+    df = pd.DataFrame({"market_cap_usd": [-5.0], "volume_usd": [50.0]})
+    assert np.isnan(compute_velocity(df)["velocity"].iloc[0])
+
+
+def test_negative_volume_gives_nan_holding_time():
+    df = pd.DataFrame({"market_cap_usd": [1000.0], "volume_usd": [-5.0]})
+    assert np.isnan(compute_velocity(df)["holding_time_days"].iloc[0])
+
+
+# ---- Fix round 1, Ruling A: equity rows must be hashable -----------------
+
+
+def test_equity_rows_merge_into_scd2_rather_than_raising_on_a_missing_value(monkeypatch):
+    """pd.NA is unhashable by stable_hash, which made the equity source dead on arrival."""
+    monkeypatch.setattr(yfinance, "download", lambda tickers, **kwargs: _yf_frame())
+    result = EquitySource().fetch(
+        START, END, [_equity("AAPL", "AAPL"), _equity("SPY", "SPY")], client=None
+    )
+    merged = merge_scd2(
+        pd.DataFrame(),
+        result.frame,
+        ["asset", "metric_date"],
+        ["price_usd", "market_cap_usd", "volume_usd"],
+        dt.datetime(2026, 10, 11, tzinfo=dt.UTC),
+    )
+    assert len(merged) == 5
+    assert merged["row_hash"].notna().all()
+
+
+# ---- Fix round 1, Ruling D: a rate limit must not discard earlier assets --
+
+
+def _gecko_handler(load_fixture, failing: set[str], status: int = 429):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if any(name in request.url.path for name in failing):
+            return httpx.Response(status)
+        return httpx.Response(200, json=load_fixture("coingecko_btc_market_chart.json"))
+
+    return handler
+
+
+def test_fetch_keeps_assets_already_fetched_when_a_later_one_rate_limits(load_fixture, sleeps):
+    requests: list[httpx.Request] = []
+    client = _client(_gecko_handler(load_fixture, {"ethereum"}), requests)
+    result = CoinGeckoSource(max_retries=2).fetch(
+        START, END, [_asset("BTC", "bitcoin"), _asset("ETH", "ethereum")], client
+    )
+    assert set(result.frame["asset"]) == {"bitcoin"}
+    assert len(result.frame) == 3
+    assert len(result.errors) == 1
+    assert "ethereum" in result.errors[0]
+
+
+def test_fetch_stops_at_the_first_failure_rather_than_hammering_the_rest(load_fixture, sleeps):
+    requests: list[httpx.Request] = []
+    client = _client(_gecko_handler(load_fixture, {"ethereum"}), requests)
+    assets = [_asset("BTC", "bitcoin"), _asset("ETH", "ethereum"), _asset("ADA", "cardano")]
+    CoinGeckoSource(max_retries=2).fetch(START, END, assets, client)
+    assert [r.url.path.split("/")[4] for r in requests] == ["bitcoin", "ethereum", "ethereum"]
+
+
+def test_a_successful_fetch_reports_no_errors(load_fixture, sleeps):
+    requests: list[httpx.Request] = []
+    client = _client(_gecko_handler(load_fixture, set()), requests)
+    result = CoinGeckoSource().fetch(START, END, [_asset("BTC", "bitcoin")], client)
+    assert result.errors == ()
+
+
+# ---- Review fix pass: yfinance drops tickers silently; say so ------------
+
+
+def test_equities_validate_against_their_own_contract():
+    """Ruling K's production change: the CoinGecko contract's 48h SLA fails every
+    Monday because equity markets close."""
+    assert EquitySource().contract_path.endswith("equity_prices.yml")
+
+
+def test_a_ticker_yfinance_silently_dropped_is_reported_as_an_error(monkeypatch):
+    """Live on 2026-10-11 yfinance logged "database is locked" for TSLA and META,
+    dropped them, and still returned the other tickers."""
+    frame = _yf_frame().drop(columns=[("Close", "SPY"), ("Volume", "SPY")])
+    monkeypatch.setattr(yfinance, "download", lambda tickers, **kwargs: frame)
+    result = EquitySource().fetch(
+        START, END, [_equity("AAPL", "AAPL"), _equity("SPY", "SPY")], client=None
+    )
+    assert set(result.frame["asset"]) == {"AAPL"}
+    assert result.errors == ("SPY: no rows returned",)
+
+
+def test_a_complete_equity_fetch_reports_no_errors(monkeypatch):
+    monkeypatch.setattr(yfinance, "download", lambda tickers, **kwargs: _yf_frame())
+    result = EquitySource().fetch(
+        START, END, [_equity("AAPL", "AAPL"), _equity("SPY", "SPY")], client=None
+    )
+    assert result.errors == ()
+
+
+def test_default_pacing_is_six_seconds_between_assets():
+    # Measured 2026-10-12: three consecutive `make ingest` runs at the previous 2.5 s
+    # (~24 calls/min) all ended `status: partial` on HTTP 429, failing at assets 2, 21 and
+    # 21 of 24. The keyless tier no longer sustains that; 6.0 s is ~10 calls/min.
+    assert CoinGeckoSource().sleep_between_assets_s == 6.0
+
+
+# ---- supply metadata (/coins/markets) ---------------------------------------
+
+
+def test_parse_supply_metadata_keeps_a_null_max_supply_null(load_fixture):
+    frame = parse_supply_metadata(load_fixture("coingecko_markets.json")).set_index("gecko_id")
+
+    assert frame.loc["aave", "max_supply"] == pytest.approx(16_000_000.0)
+    # ETH has NO maximum supply. Not zero, not total_supply: null.
+    assert pd.isna(frame.loc["ethereum", "max_supply"])
+    assert frame.loc["ethereum", "total_supply"] == pytest.approx(122_133_648.45963953)
+
+
+def test_parse_supply_metadata_never_falls_back_to_total_supply():
+    payload = [
+        {
+            "id": "x",
+            "circulating_supply": 10.0,
+            "total_supply": 20.0,
+            "max_supply": None,
+            "fully_diluted_valuation": None,
+            "market_cap": 100.0,
+        }
+    ]
+    frame = parse_supply_metadata(payload)
+    assert pd.isna(frame["max_supply"].iloc[0])
+    assert frame["total_supply"].iloc[0] == pytest.approx(20.0)
+
+
+def test_supply_frame_carries_no_run_date():
+    """The capture instant is SCD2's effective_start_ts. A run-date column here would be
+    hashed into row_hash and re-vintage every asset on every daily ingest."""
+    frame = parse_supply_metadata([{"id": "x", "total_supply": 20.0}])
+    assert "supply_as_of" not in frame.columns
+
+
+def _supply_payload(**overrides):
+    base = {
+        "id": "x",
+        "circulating_supply": 10,
+        "total_supply": 20,
+        "max_supply": None,
+        "fully_diluted_valuation": 300,
+    }
+    return [{**base, **overrides}]
+
+
+def test_a_rerun_with_unchanged_vendor_values_opens_no_new_version():
+    """Pins the defect the brief's supply_as_of = today() would have caused: same values,
+    two different run instants, must change nothing."""
+    cols = ["circulating_supply", "total_supply", "max_supply", "fully_diluted_valuation"]
+    first = merge_scd2(
+        None,
+        parse_supply_metadata(_supply_payload()),
+        ["gecko_id"],
+        cols,
+        dt.datetime(2026, 10, 13, 9, tzinfo=dt.UTC),
+    )
+    second = merge_scd2(
+        first,
+        parse_supply_metadata(_supply_payload()),
+        ["gecko_id"],
+        cols,
+        dt.datetime(2026, 10, 14, 9, tzinfo=dt.UTC),
+    )
+    assert len(second) == len(first) == 1
+    assert second["is_current"].tolist() == [True]
+    assert second["effective_start_ts"].iloc[0] == first["effective_start_ts"].iloc[0]
+
+
+def test_a_real_supply_restatement_does_open_a_new_version():
+    cols = ["circulating_supply", "total_supply", "max_supply", "fully_diluted_valuation"]
+    first = merge_scd2(
+        None,
+        parse_supply_metadata(_supply_payload()),
+        ["gecko_id"],
+        cols,
+        dt.datetime(2026, 10, 13, 9, tzinfo=dt.UTC),
+    )
+    second = merge_scd2(
+        first,
+        parse_supply_metadata(_supply_payload(total_supply=21)),
+        ["gecko_id"],
+        cols,
+        dt.datetime(2026, 10, 14, 9, tzinfo=dt.UTC),
+    )
+    assert len(second) == 2 and second["is_current"].sum() == 1
+
+
+def test_integer_json_numbers_hash_like_floats():
+    """The vendor sends 81610 for a price and 21000000.0 for a supply in one payload;
+    int64 against float64 serialises differently in row_hash (the Task 4 defect)."""
+    cols = ["circulating_supply", "total_supply", "max_supply", "fully_diluted_valuation"]
+    # No null column, or iterrows would upcast the row to float and hide the difference.
+    as_float = parse_supply_metadata(
+        _supply_payload(
+            circulating_supply=10.0,
+            total_supply=20.0,
+            max_supply=30.0,
+            fully_diluted_valuation=300.0,
+        )
+    )
+    as_int = parse_supply_metadata(_supply_payload(max_supply=30))
+    first = merge_scd2(None, as_float, ["gecko_id"], cols, dt.datetime(2026, 10, 13, tzinfo=dt.UTC))
+    again = merge_scd2(first, as_int, ["gecko_id"], cols, dt.datetime(2026, 10, 14, tzinfo=dt.UTC))
+    assert len(again) == 1
+
+
+def test_supply_source_metadata():
+    source = CoinGeckoSupplySource()
+    assert source.name == "coingecko_supply"
+    assert source.contract_path.endswith("coingecko_supply.yml")
+
+
+def test_supply_fetch_makes_one_request_for_the_whole_universe(load_fixture):
+    requests: list[httpx.Request] = []
+    client = _client(
+        lambda r: httpx.Response(200, json=load_fixture("coingecko_markets.json")), requests
+    )
+    result = CoinGeckoSupplySource().fetch(
+        START, END, [_asset("ETH", "ethereum"), _asset("AAVE", "aave"), _asset("XXX", None)], client
+    )
+    assert len(requests) == 1
+    assert requests[0].url.params["ids"] == "aave,ethereum"
+    assert sorted(result.frame["gecko_id"]) == ["aave", "ethereum"]
+    assert result.errors == ()
+
+
+def test_supply_fetch_names_an_id_the_vendor_did_not_return(load_fixture):
+    client = _client(lambda r: httpx.Response(200, json=load_fixture("coingecko_markets.json")), [])
+    result = CoinGeckoSupplySource().fetch(
+        START, END, [_asset("ETH", "ethereum"), _asset("SOL", "solana")], client
+    )
+    assert result.errors == ("no market row returned for 1 of 2 requested ids: ['solana']",)
+
+
+def test_supply_fetch_with_no_gecko_id_makes_no_request():
+    requests: list[httpx.Request] = []
+    client = _client(lambda r: httpx.Response(200, json=[]), requests)
+    result = CoinGeckoSupplySource().fetch(START, END, [_asset("XXX", None)], client)
+    assert requests == [] and result.frame.empty

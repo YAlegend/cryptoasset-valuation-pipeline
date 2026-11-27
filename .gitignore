@@ -1,0 +1,20 @@
+.venv/
+__pycache__/
+*.pyc
+# data is a symlink to ~/cryptoval-data, outside iCloud Drive: iCloud's conflict copies
+# duplicated every panel row on 2026-10-18. No trailing slash: a symlink is a file.
+data
+*.duckdb
+dbt/target/
+dbt/logs/
+dbt/dbt_packages/
+.pytest_cache/
+.coverage
+htmlcov/
+.env
+.superpowers/
+*.egg-info/
+dbt/.user.yml
+.DS_Store
+.worktrees/
+.claude/

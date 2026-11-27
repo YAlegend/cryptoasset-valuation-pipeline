@@ -1,0 +1,5 @@
+{"data":[
+ {"asset":"eth","time":"2026-10-05T00:00:00.000000000Z","CapMrktCurUSD":"331300000000","CapMVRVCur":null,"PriceUSD":"2740","HashRate":null},
+ {"asset":"xyz","time":"2026-10-05T00:00:00.000000000Z","CapMrktCurUSD":"1000000","CapMVRVCur":"0","PriceUSD":"1.0"},
+ {"asset":"neg","time":"2026-10-05T00:00:00.000000000Z","CapMrktCurUSD":"1000000","CapMVRVCur":"-0.5","PriceUSD":"1.0"}
+]}

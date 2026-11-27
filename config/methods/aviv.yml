@@ -1,0 +1,14 @@
+method_id: aviv
+family: E_cost
+requires: [market_cap_usd, liveliness, investor_cap_usd]
+min_density: 0.5
+min_rows: 30
+returns_fair_value: false
+params: {}
+citation: "Cointime Economics (Puell and Check): active value to investor value"
+
+failure_modes:
+- Inherits the MVRV identity's fragility (spec 6.2) through investor cap, which is realized cap minus thermocap.
+- Liveliness here weights coinblocks by the protocol subsidy schedule, so lost coins never stop earning coinblocks.
+assumptions:
+- Active cap is market cap times Liveliness.

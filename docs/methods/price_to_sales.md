@@ -1,0 +1,32 @@
+# price_to_sales
+
+**Family:** D_multiples
+**Citation:** P/S on NET protocol revenue, spec 10.4-10.5
+**Returns a fair value:** yes
+
+## Data dependencies
+
+- `price_usd`
+- `supply`
+- `net_revenue_usd`
+
+Minimum coverage density: **50%** per column. Minimum observations:
+**365**. Below either threshold the method returns `applicable=False` with the
+measured density in its reason, rather than a number fitted on too little data.
+
+## Parameters
+
+- `denominator` = `'net_revenue_usd'`
+- `target_multiple` = `15.0`
+- `window_rows` = `365`
+
+## Failure modes
+
+- The retained share is what this measures, so a protocol in the fees_fully_distributed regime has a near-zero denominator and the multiple explodes: read revenue_regime on fct_protocol_revenue_daily before reading this number.
+- Net revenue can be NEGATIVE (a protocol paying out more than it earns is a real event). A negative trailing mean is refused rather than returned as a negative fair value.
+- target_multiple 15.0 is a CHOICE, not a measurement: the estimate scales linearly in it.
+- An annualised trailing window assumes the last year of revenue repeats.
+
+## Assumptions
+
+- Trailing-window net revenue annualises, and 15x revenue is a defensible multiple.

@@ -1,0 +1,17 @@
+method_id: puell_multiple
+family: E_cost
+requires: [issuance_usd, price_usd]
+min_density: 0.9
+min_rows: 730
+params: {window_rows: 365, target_multiple: 1.0}
+citation: "David Puell (2019), Puell multiple; spec 6.2 derives it from free inputs"
+failure_modes:
+- 'A miner-revenue oscillator, not a valuation: fair value here means "the price at which daily
+  issuance revenue equals its own trailing-year average", which is a cycle indicator wearing a
+  price''s clothes.'
+- A halving halves issuance overnight, so the multiple steps by construction and the step is not
+  information about price.
+- Post-Merge ETH has no mining issuance in the miner sense, so the series describes staking issuance
+  instead and the analogy to Puell's own construction breaks.
+assumptions:
+- Issuance revenue mean-reverts to its trailing-year average.

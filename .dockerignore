@@ -1,0 +1,13 @@
+data
+.venv
+.worktrees
+.git
+.superpowers
+.claude
+dbt/target
+dbt/logs
+dbt/dbt_packages
+**/__pycache__
+.pytest_cache
+*.egg-info
+*.duckdb

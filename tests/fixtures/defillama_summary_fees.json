@@ -1,0 +1,53 @@
+{
+  "name": "Ethereum",
+  "slug": "ethereum",
+  "total24h": 354748,
+  "methodology": {
+    "UserFees": "Gas fees paid by users",
+    "Fees": "Total ETH gas fees (base fees + priority fees) plus blob fees (post-EIP-4844, type-3 blob-carrying transactions) paid by users",
+    "Revenue": "Amount of ETH burned \u2014 base fees plus blob fees (both are permanently burned, accruing to no proposer)",
+    "HoldersRevenue": "Amount of ETH burned \u2014 base fees plus blob fees"
+  },
+  "totalDataChart": [
+    [
+      1438905600,
+      50
+    ],
+    [
+      1438992000,
+      91
+    ],
+    [
+      1439078400,
+      10
+    ],
+    [
+      1439164800,
+      33
+    ],
+    [
+      1439251200,
+      14
+    ],
+    [
+      1791590400,
+      273359
+    ],
+    [
+      1791676800,
+      271468
+    ],
+    [
+      1791763200,
+      386649
+    ],
+    [
+      1791849600,
+      404507
+    ],
+    [
+      1791936000,
+      354748
+    ]
+  ]
+}

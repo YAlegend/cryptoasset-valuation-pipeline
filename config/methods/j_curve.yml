@@ -1,0 +1,22 @@
+method_id: j_curve
+family: A_monetary
+requires: [volume_total_usd, supply, price_usd]
+min_density: 0.6
+min_rows: 180
+params:
+  velocity_source: parameter
+  velocity_daily: 0.04
+citation: "Burniske (2017), crypto J-curve; dissertation section 3.2"
+
+# Card prose (spec 12): the judgment that cannot be derived from the spec above.
+failure_modes:
+- The dissertation's printed CUV formula is dimensionally incoherent - it divides a stock by a rate
+  with no holding period - so this implements the economically intended form. That deviation is the
+  headline, not a detail.
+- The split between current utility and speculative value is unobservable, so the decomposition is an
+  assumption dressed as a measurement.
+- Inherits crypto_qtm's sensitivity to velocity_daily and the same exchange-volume objection.
+assumptions:
+- An exogenous daily velocity of 0.04.
+- Today's utility value is the discounted monetary value of today's transaction demand, and everything
+  above it is discounted expectation.
